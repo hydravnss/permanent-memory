@@ -37,19 +37,20 @@ const FIELDS = [
     { key: 'groupAllMembers', type: 'check', label: 'Groupes : injecter les souvenirs de tous les membres du groupe (+ groupe + monde). Décoché : seulement le perso qui parle.' },
     { key: 'groupIncludeMuted', type: 'check', label: 'Groupes : inclure aussi les membres « muets »' },
     { sec: 'Création des souvenirs' },
-    { key: 'heuristics', type: 'check', label: 'Détecter des candidats en local (gratuit)' },
+    { key: 'heuristics', type: 'check', label: 'Détecter en local (gratuit) des faits simples : « X s’appelle… », « X habite… », goûts. Ne résume pas : seule l’IA résume.' },
     { key: 'heuristicsMinScore', type: 'num', label: 'Exigence de la détection locale (1 = large, 4 = strict)', min: 1, max: 6 },
     { key: 'messageButton', type: 'check', label: 'Bouton 🧠 « Mémoriser » sur chaque message' },
     { sec: 'IA (optionnel — coûte des crédits)' },
     { key: 'neverAI', type: 'check', label: '🚫 Ne jamais appeler l’IA (100 % local, aucune requête)', strong: true },
     { key: 'autoExtract', type: 'check', label: 'Extraction automatique toutes les N messages' },
     { key: 'autoEvery', type: 'num', label: 'N = intervalle (messages)', min: 2, max: 100 },
-    { key: 'autoMaxItems', type: 'num', label: 'Faits max par extraction', min: 1, max: 10 },
+    { key: 'autoMaxItems', type: 'num', label: 'Souvenirs max par extraction IA', min: 1, max: 10 },
+    { key: 'sceneMessages', type: 'num', label: 'Bouton « Résumer les derniers messages » : nombre de messages résumés', min: 4, max: 60 },
     { key: 'extractMessages', type: 'num', label: 'Nombre de messages à analyser (bouton « Extraire avec l’IA »)', min: 4, max: 200 },
     { key: 'extractInputTokens', type: 'num', label: 'Extraction : budget d’entrée max (tokens ; on retire les plus anciens messages au-delà)', min: 500, max: 20000, step: 500 },
-    { key: 'autoMaxTokens', type: 'num', label: 'Réponse de l’IA : tokens max (400+ conseillé ; 1500+ avec un modèle à réflexion)', min: 50, max: 4000, step: 50 },
+    { key: 'autoMaxTokens', type: 'num', label: 'Réponse de l’IA : tokens max (700 conseillé ; 1500+ avec un modèle à réflexion)', min: 50, max: 4000, step: 50 },
     { key: 'autoToInbox', type: 'check', label: 'Envoyer dans la boîte « Candidats » (sinon ajout direct)' },
-    { key: 'maxCallsPerDay', type: 'num', label: 'Plafond d’appels par jour (0 = bloqué)', min: 0, max: 100 },
+    { key: 'maxCallsPerDay', type: 'num', label: 'Plafond d’appels IA par jour (0 = bloqué ; les essais ratés ou vides comptent aussi)', min: 0, max: 100 },
     { key: 'maxTokensPerMonth', type: 'num', label: 'Plafond de tokens par mois, estimé (0 = bloqué)', min: 0, max: 5000000, step: 1000 },
     { key: 'autoSummary', type: 'check', label: 'Résumé glissant automatique' },
     { key: 'summaryEvery', type: 'num', label: 'Mettre à jour le résumé tous les… messages', min: 10, max: 500 },
@@ -308,23 +309,31 @@ ${total ? (() => { const ak = activeKeySet(); return entries.map(({ key, m }) =>
 
 /* ---- onglet Candidats */
 
+const isRaw = (c) => !!c.raw;
+const RAW_LABEL = { extrait: '✂️ Extrait brut, à reformuler', copie: '✂️ Ressemble à une copie du chat, à reformuler' };
+
 function renderCand() {
     const keys = st.viewerScopes().map((x) => x.key);
     const list = st.candidatesFor(keys);
-    const s = S();
-    let h = `<div class="pmem-note">Ces propositions viennent de l’analyse <b>locale gratuite</b> (🧮) ou d’une extraction IA (🤖). Rien n’est mémorisé sans ton accord.</div>
+    const nRaw = list.filter(isRaw).length;
+    let h = `<div class="pmem-note">Propositions à valider d'un tap : 🤖 <b>l'IA</b> écrit de petits résumés reformulés ; 🧮 l'analyse <b>locale gratuite</b> ne sait pas résumer — elle ne trouve que des faits très simples (« X s'appelle… », « X habite… », goûts) et signale le reste comme <b>extrait brut, à reformuler</b> (✎ Modifier). Rien n'est mémorisé sans ton accord.</div>
 <div class="pmem-bar">
 <button type="button" class="menu_button" data-act="scan">🧮 Analyser l’historique (gratuit)</button>
-<button type="button" class="menu_button" data-act="acceptall"${list.length ? '' : ' disabled'}>✓ Tout accepter</button>
+<button type="button" class="menu_button" data-act="acceptall"${list.length - nRaw > 0 ? '' : ' disabled'}>✓ Tout accepter${nRaw ? ' (sauf bruts)' : ''}</button>
 <button type="button" class="menu_button" data-act="rejectall"${list.length ? '' : ' disabled'}>✗ Tout rejeter</button>
 </div>`;
     h += `<div class="pmem-bar">${aiButton('extract', '🤖 Extraire avec l’IA (1 appel)')}</div>`;
+    h += `<div class="pmem-bar">${aiButton('scene', '🎬 Résumer les derniers messages (1 appel)')}<span class="pmem-count">→ 1 candidat « événement » de 2 à 4 phrases (${S().sceneMessages} derniers messages)</span></div>`;
     if (ui.lastResult) h += `<div class="pmem-note">${esc(ui.lastResult).replace(/\n/g, '<br>')}</div>`;
     if (!list.length) return h + '<div class="pmem-empty">Aucun candidat en attente 🎉</div>';
-    return h + list.map((c) => `<div class="pmem-card cand" data-id="${c.id}">
+    return h + list.map((c) => {
+        const raw = isRaw(c);
+        return `<div class="pmem-card cand${raw ? ' raw' : ''}" data-id="${c.id}">
 <div class="pmem-card-top"><span class="pmem-type">${core.TYPE_ICONS[c.type] || ''} ${esc(core.TYPES[c.type] || c.type)}</span><span class="pmem-meta">${c.origin === 'ia' ? '🤖 IA' : '🧮 local'} · ${esc(st.scopeLabel(c.scope))} · ★${c.importance}</span></div>
+${raw ? `<div class="pmem-rawtag">${RAW_LABEL[c.raw] || RAW_LABEL.extrait}</div>` : ''}
 <div class="pmem-text">${esc(c.text)}</div>
-<div class="pmem-actions"><button type="button" data-act="c-ok" class="ok">✓ Garder</button><button type="button" data-act="c-edit">✎ Modifier</button><button type="button" data-act="c-no" class="danger">✗ Rejeter</button></div></div>`).join('');
+<div class="pmem-actions">${raw ? '' : '<button type="button" data-act="c-ok" class="ok">✓ Garder</button>'}<button type="button" data-act="c-edit"${raw ? ' class="ok"' : ''}>✎ Modifier</button><button type="button" data-act="c-no" class="danger">✗ Rejeter</button></div></div>`;
+    }).join('');
 }
 
 /** Bouton IA à deux temps : 1er tap = estimation du coût, 2e tap = lancement. */
@@ -479,22 +488,30 @@ async function onSheetClick(e) {
             break;
         }
         case 'new': openEditor({ mode: 'new', key: st.viewerScopes().find((x) => x.key === ui.scope)?.key || attribScopes()[0]?.key || 'world' }); break;
-        case 'c-ok': { const c = cand(); if (c) { st.acceptCandidate(id); st.toast('success', 'Souvenir ajouté'); } break; }
+        case 'c-ok': { const c = cand(); if (c && isRaw(c)) { openEditor({ mode: 'cand', key: c.scope, entry: c }); break; } if (c) { st.acceptCandidate(id); st.toast('success', 'Souvenir ajouté'); } break; }
         case 'c-no': st.rejectCandidate(id); break;
         case 'c-edit': { const c = cand(); if (c) openEditor({ mode: 'cand', key: c.scope, entry: c }); break; }
-        case 'acceptall': { const keys = st.viewerScopes().map((x) => x.key); const l = st.candidatesFor(keys).slice(); l.forEach((c) => st.acceptCandidate(c.id)); st.toast('success', `${l.length} souvenir(s) ajouté(s)`); break; }
+        case 'acceptall': { const keys = st.viewerScopes().map((x) => x.key); const all = st.candidatesFor(keys).slice(); const l = all.filter((c) => !isRaw(c)); l.forEach((c) => st.acceptCandidate(c.id)); st.toast('success', `${l.length} souvenir(s) ajouté(s)${all.length > l.length ? ` — ${all.length - l.length} extrait(s) brut(s) laissé(s) : à reformuler avec ✎ Modifier` : ''}`); break; }
         case 'rejectall': { const keys = st.viewerScopes().map((x) => x.key); st.candidatesFor(keys).slice().forEach((c) => st.rejectCandidate(c.id)); break; }
         case 'scan': {
             const last = (ctx().chat?.length || 1) - 1;
             const n = eng.scanMessages(last - 40, last, { notify: true });
-            ui.lastResult = `Analyse locale de l’historique récent : ${n} nouveau(x) candidat(s). Coût : 0.`;
+            ui.lastResult = `Analyse locale de l’historique récent : ${n} nouveau(x) candidat(s) (faits simples + extraits bruts à reformuler). Coût : 0. Pour de vrais petits résumés, utilise l’IA.`;
             renderSheet(); break;
         }
         case 'ai-extract': {
             if (ui.armed !== 'extract') { const est = await eng.estimateExtraction(); arm('extract', est.input + est.output); renderSheet(); break; }
             ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Extraction…';
             const r = await eng.runExtraction({ manual: true });
-            ui.lastResult = r.ok ? `Extraction IA : ${r.found} fait(s) trouvé(s) dans ${r.messages} message(s), ${r.added} nouveau(x) candidat(s) · ≈ ${r.inputTokens + r.outTokens} tokens${r.retried ? ' (1ʳᵉ réponse vide → 2ᵉ essai plus court réussi)' : ''}.` : `Extraction non effectuée : ${r.detail || r.reason}`;
+            ui.lastResult = r.ok ? `Extraction IA : ${r.found} souvenir(s) résumé(s) à partir de ${r.messages} message(s), ${r.added} nouveau(x) candidat(s)${r.duplicates ? `, ${r.duplicates} déjà connu(s) ignoré(s)` : ''}${r.copied ? `, dont ${r.copied} qui ressemble(nt) à une copie du chat (à reformuler)` : ''} · ≈ ${r.inputTokens + r.outTokens} tokens${r.retried ? ' (1ʳᵉ réponse vide → 2ᵉ essai plus court réussi)' : ''}.` : `Extraction non effectuée : ${r.detail || r.reason}`;
+            if (!r.ok) st.toast('warning', r.reason);
+            renderSheet(); break;
+        }
+        case 'ai-scene': {
+            if (ui.armed !== 'scene') { const est = await eng.estimateScene(); arm('scene', est.input + est.output); renderSheet(); break; }
+            ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Résumé de la scène…';
+            const r = await eng.runSceneSummary();
+            ui.lastResult = r.ok ? (r.added ? `Résumé de la scène (${r.messages} derniers messages) ajouté aux candidats · ≈ ${r.inputTokens + r.outTokens} tokens. Vérifie-le puis ✓ Garder.` : `Résumé de la scène déjà proposé ou rejeté auparavant : rien ajouté · ≈ ${r.inputTokens + r.outTokens} tokens.`) : `Résumé non effectué : ${r.detail || r.reason}`;
             if (!r.ok) st.toast('warning', r.reason);
             renderSheet(); break;
         }
@@ -563,6 +580,7 @@ export function openEditor({ mode = 'new', key, entry = null, text = '', type = 
     d.id = 'pmem-dialog';
     d.innerHTML = `<div class="pmem-dlg" role="dialog">
 <h4>${mode === 'edit' ? '✎ Modifier le souvenir' : mode === 'cand' ? '✎ Modifier le candidat' : '➕ Nouveau souvenir'}</h4>
+${mode === 'cand' && entry?.raw ? '<div class="pmem-note">✂️ Extrait brut : reformule-le en un petit fait à la 3ᵉ personne (10 à 25 mots), compréhensible sans le chat.</div>' : ''}
 <label>Texte (court = moins de tokens)<textarea id="pmem-d-text" class="text_pole" rows="4" maxlength="600">${esc(m.text)}</textarea></label>
 <div class="pmem-dcount" id="pmem-d-count"></div>
 <label>Type<select id="pmem-d-type" class="text_pole">${typeOptions(m.type)}</select></label>

@@ -349,26 +349,92 @@ export function scoreSentence(sentence) {
     return { score, type, imp };
 }
 
+/* -- faits structurés : seuls cas où l'analyse locale peut reformuler sans se tromper (phrase à la 1ʳᵉ personne, forme très fixe) -- */
+
+const CAP = /^\p{Lu}/u;
+const STOP_AT = /\s+(?:et|mais|car|donc|puis|avec|depuis|parce|pour|quand|que|qui|où|ou)\s.*$/i;
+const clean1 = (s) => s.replace(STOP_AT, '').replace(/[\s"»”)]+$/g, '').trim();
+const nWords = (s) => s.split(/\s+/).filter(Boolean).length;
+const BAD_OBJ = /\b(que|qu'|quand|ce|ça|cela|tu|te|t'|toi|vous|je|j'|me|m'|moi|nous|il|elle|ils|elles|lui|être|faire|voir|avoir)\b/i;
+
 /**
- * @param {Array<{name:string,is_user:boolean,mes:string,idx:number}>} messages
- * @returns {Array<{text,type,importance,keywords,idx,name,is_user,score}>}
+ * Faits très simples et fiables, reformulés à la 3ᵉ personne (« Léo s'appelle… », « Mara habite… », goûts, allergie).
+ * Tout le reste n'est PAS résumable en local : voir heuristicExtract(…, { raw: true }).
  */
-export function heuristicExtract(messages, { minScore = 2, maxPerMessage = 2, withSpeaker = true, maxLen = 260 } = {}) {
+export function structuredFacts(sentence, speaker) {
+    const name = String(speaker || '').trim();
+    if (!name) return [];
+    const s = String(sentence).replace(/[’‘`´]/g, "'").replace(/[«»“”"]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!s) return [];
+    const isQuestion = /\?\s*$/.test(s) && !/(?:appelle[- ]moi|call me)/i.test(s);
+    if (isQuestion) return [];
+    const out = [];
+    let m;
+    if ((m = s.match(/\b(?:je m'appelle|mon (?:nom|prénom|prenom) (?:est|c'est)|on m'appelle|appelle-moi|appelle moi|my name is|call me)\s+(\p{L}[\p{L}'-]*(?:\s+\p{L}[\p{L}'-]*)?)/iu))) {
+        const caps = [];
+        for (const w of m[1].split(/\s+/)) { if (CAP.test(w) && w.length >= 2) caps.push(w); else break; }
+        const nm = caps.join(' ');
+        if (nm && normalize(nm) !== normalize(name) && !STOPWORDS.has(normalize(nm))) {
+            const full = normalize(nm).startsWith(`${normalize(name)} `);
+            out.push({ text: full ? `Le nom complet de ${name} est ${nm}.` : `${name} se présente sous le nom de ${nm}.`, type: 'fait', importance: 4 });
+        }
+    }
+    if ((m = s.match(/\bj'habite\s+(à|au|aux|en|dans|près de|sur|chez)\s+([^.,;!?…]{2,40})/i))) {
+        const obj = clean1(m[2]);
+        if (obj && nWords(obj) <= 5 && !BAD_OBJ.test(obj)) out.push({ text: `${name} habite ${m[1].toLowerCase()} ${obj}.`, type: 'lieu', importance: 3 });
+    }
+    if ((m = s.match(/\bje suis allergique\s+(à|aux|au)\s+([^.,;!?…]{2,30})/i))) {
+        const obj = clean1(m[2]);
+        if (obj && nWords(obj) <= 4 && !BAD_OBJ.test(obj)) out.push({ text: `${name} est allergique ${m[1].toLowerCase()} ${obj}.`, type: 'fait', importance: 4 });
+    }
+    const like = (re, verb, imp) => {
+        const mm = s.match(re);
+        if (!mm) return;
+        const obj = clean1(mm[1]);
+        if (obj && nWords(obj) <= 5 && !BAD_OBJ.test(obj)) out.push({ text: `${name} ${verb} ${obj}.`, type: 'preference', importance: imp });
+    };
+    const ART = "(?:le|la|les|l'|un|une|des|du|de la|d'|mon|ma|mes|ton|ta|tes|notre|nos)";
+    like(new RegExp(`\\bj'adore\\s+(${ART}\\s?[^.,;!?…]{2,30})`, 'i'), 'adore', 3);
+    like(new RegExp(`\\bj'aime(?: bien| beaucoup)?\\s+(${ART}\\s?[^.,;!?…]{2,30})`, 'i'), 'aime', 3);
+    like(new RegExp(`\\bje préfère\\s+(${ART}\\s?[^.,;!?…]{2,30})`, 'i'), 'préfère', 3);
+    like(new RegExp(`\\bje (?:déteste|hais)\\s+(${ART}\\s?[^.,;!?…]{2,30})`, 'i'), 'déteste', 3);
+    like(new RegExp(`\\bje ne supporte pas\\s+(${ART}\\s?[^.,;!?…]{2,30})`, 'i'), 'ne supporte pas', 3);
+    return out;
+}
+
+/**
+ * Analyse locale (gratuite). Elle NE SAIT PAS résumer :
+ *  - faits structurés fiables, reformulés (raw: '')  → utilisables tels quels ;
+ *  - avec `raw: true` (par défaut) : en plus, la phrase brute la plus marquante, signalée raw: 'extrait' = « extrait brut, à reformuler ».
+ * @param {Array<{name:string,is_user:boolean,mes:string,idx:number}>} messages
+ * @returns {Array<{text,type,importance,keywords,idx,name,is_user,score,raw}>}
+ */
+export function heuristicExtract(messages, { minScore = 2, maxPerMessage = 2, withSpeaker = true, maxLen = 260, raw = true } = {}) {
     const out = [];
     for (const msg of messages) {
         if (!msg || !msg.mes) continue;
         const found = [];
+        const facts = [];
         for (const s of sentencesOf(String(msg.mes))) {
             if (s.length < 14 || s.length > 420) continue;
+            const sf = structuredFacts(s, msg.name);
+            if (sf.length) { for (const f of sf) facts.push({ ...f, s }); continue; }
             const r = scoreSentence(s);
             if (r.score >= minScore) found.push({ s, r });
         }
+        const seen = new Set();
+        for (const f of facts) {
+            if (seen.has(f.text) || seen.size >= 4) continue;
+            seen.add(f.text);
+            out.push({ text: f.text, type: f.type, importance: f.importance, keywords: autoKeywords(`${msg.name} ${f.text}`), idx: msg.idx, name: msg.name, is_user: !!msg.is_user, score: 3, raw: '' });
+        }
+        if (!raw) continue;
         found.sort((a, b) => b.r.score - a.r.score);
         for (const { s, r } of found.slice(0, maxPerMessage)) {
             let text = s.replace(/^[«"“\s]+|[»"”\s]+$/g, '');
             if (text.length > maxLen) text = text.slice(0, maxLen).replace(/\s+\S*$/, '') + '…';
             if (withSpeaker && msg.name) text = `${msg.name} : ${text}`;
-            out.push({ text, type: r.type, importance: Math.min(5, r.imp), keywords: autoKeywords(s), idx: msg.idx, name: msg.name, is_user: !!msg.is_user, score: r.score });
+            out.push({ text, type: r.type, importance: Math.min(5, r.imp), keywords: autoKeywords(s), idx: msg.idx, name: msg.name, is_user: !!msg.is_user, score: r.score, raw: 'extrait' });
         }
     }
     return out;
@@ -395,10 +461,92 @@ export function trimMessageForMemory(mes, maxChars = 220) {
 
 /* ------------------------------------------------------------------ extraction par l'IA : prompt + analyse */
 
-export function buildExtractionPrompt(messages, { maxItems = 4, msgChars = 400 } = {}) {
-    const system = `Tu extrais la mémoire à long terme d'un jeu de rôle. Réponds UNIQUEMENT par 0 à ${maxItems} lignes, une par fait durable, au format exact :\ntype|importance(1-5)|fait court (max 20 mots)|mot-clé1,mot-clé2\nTypes : fait, relation, evenement, preference, lieu, objectif. Garde seulement ce qui servira plus tard (noms, liens, promesses, événements marquants, préférences). Aucune introduction, aucune explication. Si rien d'important : réponds RIEN.`;
+/**
+ * Souvenirs déjà connus, en liste compacte (une ligne courte chacun) pour que l'IA ne les répète pas.
+ * Priorité : importance décroissante puis récents ; plafonné en caractères (donc en tokens).
+ */
+export function compactExisting(texts, { maxChars = 1600, lineChars = 140 } = {}) {
+    const out = [];
+    let used = 0;
+    for (const t of texts) {
+        let line = cleanText(t);
+        if (!line) continue;
+        if (line.length > lineChars) line = line.slice(0, lineChars).replace(/\s+\S*$/, '') + '…';
+        if (used + line.length + 3 > maxChars) break;
+        out.push(line);
+        used += line.length + 3;
+    }
+    return out;
+}
+
+const WORD_RUN = 10;
+const FIRST_PERSON = /(?:^|[^a-z0-9])(?:j'|t'|(?:je|tu|moi|toi|mon|ma|mes|ton|ta|tes)(?![a-z0-9]))/;
+const wordsRaw = (s) => normalize(s).replace(/'/g, ' ').match(/[a-z0-9]+/g) || [];
+
+/**
+ * Détecte un « souvenir » qui recopie le chat : guillemets / dialogue, suite de 10 mots identique à un message, ou phrase à la 1ʳᵉ/2ᵉ personne
+ * (« je te promets… » = réplique, pas un résumé).
+ * Renvoie '' si ça semble reformulé, sinon la raison.
+ */
+export function copyReason(text, messages) {
+    if (/[«»“”"]/.test(String(text))) return 'guillemets';
+    const w = wordsRaw(text);
+    if (w.length < WORD_RUN) return FIRST_PERSON.test(normalize(text)) ? 'première personne' : '';
+    const runs = new Set();
+    for (const m of messages || []) {
+        const mw = wordsRaw(cleanText(m.mes ?? m));
+        for (let i = 0; i + WORD_RUN <= mw.length; i++) runs.add(mw.slice(i, i + WORD_RUN).join(' '));
+    }
+    for (let i = 0; i + WORD_RUN <= w.length; i++) if (runs.has(w.slice(i, i + WORD_RUN).join(' '))) return 'phrase recopiée';
+    if (FIRST_PERSON.test(normalize(text))) return 'première personne';
+    return '';
+}
+
+export function buildExtractionPrompt(messages, { maxItems = 8, msgChars = 400, existing = [] } = {}) {
+    const system = `Tu tiens la mémoire à long terme d'un jeu de rôle (souvent en groupe, avec plusieurs personnages). À partir des messages fournis, tu écris de PETITS SOUVENIRS RÉSUMÉS ET REFORMULÉS, jamais des copies du chat.
+
+Règles :
+- Une ligne = un seul fait, de 10 à 25 mots, en français, à la troisième personne, avec les prénoms tels qu'ils apparaissent dans les messages (« Léo… », « Mara… »). Jamais « je », « tu », « nous ».
+- Reformule avec tes propres mots. Ne recopie AUCUNE phrase ni réplique : pas de guillemets, pas de dialogue, pas de citation, pas de description de gestes.
+- Chaque souvenir doit se comprendre seul, sans avoir lu le chat : nomme les personnes et les lieux (pas de « il », « elle », « ici », « hier » sans précision).
+- Sois complet sur ce qui servira plus tard : relations entre personnages (liens, sentiments, tensions), événements marquants, décisions, promesses et engagements, secrets (et qui les connaît), préférences et aversions, état émotionnel durable, lieux et objets importants. Couvre tous les points importants avant de détailler un seul.
+- Ignore le décor, les politesses, les gestes passagers, et tout ce qui figure déjà dans les souvenirs connus (ne le répète pas, n'ajoute que du nouveau ou un vrai changement).
+- Au maximum ${maxItems} lignes.
+
+Format exact, une ligne par souvenir, rien d'autre :
+type|importance(1-5)|souvenir|mot-clé1,mot-clé2
+Types : fait, relation, evenement, preference, lieu, objectif (objectif = promesse, décision ou but).
+
+Exemples de bonnes lignes (ne les recopie pas) :
+relation|4|Mara se méfie de Théo depuis qu'il lui a menti sur l'origine de la lettre.|Mara,Théo,méfiance
+evenement|5|Léo a découvert que le maire Dorian finance en secret la bande qui attaque le village.|Léo,Dorian,secret
+objectif|4|Nina a promis à Léo de l'accompagner à Valmont dès que la tempête sera passée.|Nina,Léo,Valmont,promesse
+preference|2|Théo déteste le café et boit chaque matin du thé noir sans sucre.|Théo,thé
+lieu|3|La vieille tour de guet, au nord du village, sert de refuge secret au groupe.|tour,refuge
+
+Aucune introduction, aucune explication. Si rien de nouveau ni d'important : réponds RIEN.`;
+    const known = existing.length ? `Souvenirs déjà connus (à ne pas répéter) :\n${existing.map((t) => `- ${t}`).join('\n')}\n\n` : '';
     const body = messages.map((m) => `${m.name}: ${cleanText(m.mes).slice(0, msgChars)}`).join('\n');
-    return { systemPrompt: system, prompt: `Messages :\n${body}\n\nFaits à retenir :` };
+    return { systemPrompt: system, prompt: `${known}Messages :\n${body}\n\nSouvenirs résumés à ajouter (reformulés, 3ᵉ personne) :` };
+}
+
+/** Résumé de la scène récente : 2 à 4 phrases, un seul souvenir de type événement. */
+export function buildScenePrompt(messages, { msgChars = 700 } = {}) {
+    const system = `Tu résumes la scène récente d'un jeu de rôle pour garder la continuité. Écris 2 à 4 phrases courtes, en français, à la troisième personne, avec les prénoms des personnages. Raconte ce qui s'est passé d'important (événements, décisions, révélations, changements de relation, de lieu ou d'état d'esprit) et dans quelle situation la scène s'arrête. Reformule avec tes propres mots : aucune réplique recopiée, aucun guillemet. Le résumé doit se comprendre sans avoir lu le chat. Réponds UNIQUEMENT par le résumé : ni introduction, ni titre, ni liste.`;
+    const body = messages.map((m) => `${m.name}: ${cleanText(m.mes).slice(0, msgChars)}`).join('\n');
+    return { systemPrompt: system, prompt: `Messages :\n${body}\n\nRésumé de la scène (2 à 4 phrases) :` };
+}
+
+/** Nettoie la réponse « résumé de scène » (réflexion, clôtures, titre, guillemets englobants). */
+export function parseSceneSummary(raw, maxChars = 600) {
+    let t = stripModelNoise(raw).replace(/^\s*(voici|résumé|resume|scène|scene)[^\n:]{0,40}:\s*/i, '');
+    t = cleanText(t).replace(/^["«“]\s*|\s*["»”]$/g, '').trim();
+    if (t.length > maxChars) {
+        const cut = t.slice(0, maxChars);
+        const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
+        t = end > maxChars * 0.5 ? cut.slice(0, end + 1) : cut.replace(/\s+\S*$/, '') + '…';
+    }
+    return t.length >= 10 ? t : '';
 }
 
 export function buildSummaryPrompt(previous, messages, { maxWords = 120, msgChars = 500 } = {}) {

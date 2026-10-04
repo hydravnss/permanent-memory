@@ -14,7 +14,7 @@ export const PROMPT_KEY = 'permanent_memory';
 export const FILE = 'permanent_memory_store.json';
 export const LOG = '[Mémoire Permanente]';
 export const VERSION = '1.0.1';
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 export const STORE_VERSION = 1;
 
 export const ctx = () => globalThis.SillyTavern.getContext();
@@ -47,11 +47,12 @@ export const DEFAULTS = Object.freeze({
     neverAI: false,
     autoExtract: false,
     autoEvery: 10,
-    autoMaxItems: 4,
-    autoMaxTokens: 400, // large : un modèle « à réflexion » (DeepSeek reasoner…) consomme ces tokens avant de répondre
+    autoMaxItems: 8, // souvenirs max par extraction (1.1.0 : 4 → 8, pour des résumés plus complets)
+    autoMaxTokens: 700, // large : 8 souvenirs de ~25 mots ≈ 450 tokens ; un modèle « à réflexion » (DeepSeek reasoner…) consomme aussi ces tokens avant de répondre
     extractMessages: 40, // extraction manuelle : nombre de derniers messages analysés
-    extractInputTokens: 3000, // extraction : budget d’entrée (les plus anciens messages sont retirés au-delà)
+    extractInputTokens: 4000, // extraction : budget d’entrée (les plus anciens messages sont retirés au-delà) ; 1.1.0 : 3000 → 4000 (le prompt de résumés est plus long)
     autoMsgChars: 400,
+    sceneMessages: 12, // « Résumer les derniers messages » : nombre de messages résumés
     autoToInbox: true,
     maxCallsPerDay: 5,
     maxTokensPerMonth: 30000,
@@ -85,7 +86,7 @@ export const PRESETS = Object.freeze({
 
 const NUM = {
     maxMemories: [1, 30], maxTokens: [50, 3000], scanDepth: [1, 10], position: [0, 2], depth: [0, 50], role: [0, 2],
-    heuristicsMinScore: [1, 6], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 4000], extractMessages: [4, 200], extractInputTokens: [500, 20000], autoMsgChars: [100, 2000],
+    heuristicsMinScore: [1, 6], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 4000], extractMessages: [4, 200], extractInputTokens: [500, 20000], autoMsgChars: [100, 2000], sceneMessages: [4, 60],
     maxCallsPerDay: [0, 100], maxTokensPerMonth: [0, 5000000], summaryEvery: [10, 500], summaryMaxTokens: [50, 1000], archiveDays: [7, 730],
     floatX: [0, 100], floatY: [0, 100], floatSize: [34, 90],
 };
@@ -95,6 +96,7 @@ export function S() {
     const es = ctx().extensionSettings;
     if (!es[MODULE] || typeof es[MODULE] !== 'object') es[MODULE] = {};
     const s = es[MODULE];
+    const prevVersion = Number(s.settingsVersion) || 1;
     for (const [k, v] of Object.entries(DEFAULTS)) {
         if (s[k] === undefined) s[k] = k === 'stats' ? { ...v } : v;
     }
@@ -106,8 +108,22 @@ export function S() {
     if (typeof s.header !== 'string') s.header = DEFAULTS.header;
     s.groupAllMembers = s.groupAllMembers !== false;
     s.groupIncludeMuted = s.groupIncludeMuted !== false;
+    if (prevVersion < 3) migrateTo3(s);
     s.settingsVersion = SETTINGS_VERSION;
     return s;
+}
+
+/**
+ * Migration 1.1.0 : seules les valeurs ÉGALES à l'ancien défaut sont remplacées (jamais une valeur personnalisée).
+ *  - plafond d'appels / jour : 2 → 5 (sauf si le préréglage « Économie », qui vaut 2 volontairement, est actif) ;
+ *  - faits max par extraction : 4 → 8 ; réponse de l'IA : 400 → 700 tokens ; budget d'entrée : 3000 → 4000 (prompt de résumés plus complets).
+ */
+function migrateTo3(s) {
+    if (s.maxCallsPerDay === 2 && s.preset !== 'economie') s.maxCallsPerDay = DEFAULTS.maxCallsPerDay;
+    if (s.autoMaxItems === 4) s.autoMaxItems = DEFAULTS.autoMaxItems;
+    if (s.autoMaxTokens === 400) s.autoMaxTokens = DEFAULTS.autoMaxTokens;
+    if (s.extractInputTokens === 3000) s.extractInputTokens = DEFAULTS.extractInputTokens;
+    try { saveSettings(); } catch { /* ignore */ }
 }
 
 export const saveSettings = () => ctx().saveSettingsDebounced();
@@ -158,7 +174,9 @@ function normalizeStore(raw) {
     }
     for (const c of Array.isArray(raw.candidates) ? raw.candidates : []) {
         if (!c || !c.text || !c.scope) continue;
-        out.candidates.push({ ...core.makeMemory(c, taken), scope: String(c.scope), origin: c.origin || 'heuristique', chat: c.chat || null });
+        // anciens candidats « heuristique » (1.0.x) = phrases brutes : ils sont signalés « extrait brut »
+        const raw = c.raw === 'copie' ? 'copie' : (c.raw || (c.raw === undefined && (c.origin || 'heuristique') === 'heuristique')) ? 'extrait' : '';
+        out.candidates.push({ ...core.makeMemory(c, taken), scope: String(c.scope), origin: c.origin || 'heuristique', chat: c.chat || null, raw });
     }
     out.rejected = (Array.isArray(raw.rejected) ? raw.rejected : []).filter((x) => typeof x === 'string').slice(-300);
     return out;
@@ -500,7 +518,7 @@ export function addCandidate(c) {
     const existing = [...getList(c.scope, false)];
     if (core.isNearDuplicate(c.text, existing, 0.7)) return null;
     if (core.isNearDuplicate(c.text, store.candidates.filter((x) => x.scope === c.scope), 0.7)) return null;
-    const cand = { ...core.makeMemory(c, takenIds()), scope: c.scope, origin: c.origin || 'heuristique', chat: ctx().getCurrentChatId?.() ?? null };
+    const cand = { ...core.makeMemory(c, takenIds()), scope: c.scope, origin: c.origin || 'local', chat: ctx().getCurrentChatId?.() ?? null, raw: c.raw === 'copie' ? 'copie' : c.raw ? 'extrait' : '' };
     if (!cand.text) return null;
     store.candidates.push(cand);
     while (store.candidates.length > s.inboxMax) store.candidates.shift();

@@ -106,8 +106,9 @@ ok(log.length === 2 && !log.some(isExtractionReq) && !log.some(isSummaryReq), `M
 const r1 = await P(() => globalThis.permanentMemory.engine.runExtraction({ manual: true }));
 const r2 = await P(() => globalThis.permanentMemory.engine.runSummary({ manual: true }));
 ok(!r1.ok && !r2.ok && (await reqCount()) === 2, `Appels manuels refusés (« ${r1.reason} »), toujours 2 requêtes`);
-const cand = await P(() => globalThis.permanentMemory.store.store.candidates.map((c) => ({ t: c.text, o: c.origin, ty: c.type })));
-ok(cand.some((c) => /promets|appelle/i.test(c.t) && c.o === 'heuristique'), `Détection locale: ${cand.length} candidat(s) sans IA (${cand.map((c) => c.ty).join(',')})`);
+const cand = await P(() => globalThis.permanentMemory.store.store.candidates.map((c) => ({ t: c.text, o: c.origin, ty: c.type, raw: c.raw })));
+// 1.1.0 : la détection automatique ne propose que des faits reformulés (« X se présente sous le nom de… »), jamais la phrase brute
+ok(cand.some((c) => /se présente sous le nom de Léo/i.test(c.t) && c.o === 'local' && !c.raw) && cand.every((c) => !c.raw), `Détection locale: ${cand.length} candidat(s) sans IA, reformulés (${cand.map((c) => c.t).join(' | ')})`);
 const blocked = await P(() => globalThis.permanentMemory.settings().stats.blocked);
 ok(blocked >= 2, `Compteur d’appels refusés = ${blocked}`);
 await shot(page, '02-candidats');

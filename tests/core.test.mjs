@@ -78,4 +78,62 @@ t('parseExtraction tolérant : JSON, ```, texte autour, réflexion', () => {
     assert.equal(core.parseExtraction('["Mara possède une épée runique"]', 6).length, 1);
     assert.equal(core.stripModelNoise('<think>x</think>  ').length, 0);
 });
+t('1.1.0 prompt d’extraction : résumés reformulés, exemples, dédoublonnage, format conservé', () => {
+    const msgs = [{ name: 'Léo', mes: 'Bonjour Mara.' }, { name: 'Mara', mes: 'Salut.' }];
+    const p = core.buildExtractionPrompt(msgs, { maxItems: 8, existing: ['Léo est forgeron à Valmont.', 'Mara se méfie de Théo.'] });
+    assert.match(p.systemPrompt, /mémoire à long terme d'un jeu de rôle/);
+    assert.match(p.systemPrompt, /type\|importance\(1-5\)\|souvenir\|mot-clé1,mot-clé2/); // format de sortie inchangé
+    assert.match(p.systemPrompt, /troisième personne/); assert.match(p.systemPrompt, /10 à 25 mots/);
+    assert.match(p.systemPrompt, /AUCUNE phrase ni réplique/); assert.match(p.systemPrompt, /Au maximum 8 lignes/);
+    for (const k of ['relations entre personnages', 'événements marquants', 'décisions', 'promesses', 'secrets', 'préférences', 'état émotionnel durable', 'lieux et objets']) assert.ok(p.systemPrompt.includes(k), k);
+    // les exemples du prompt sont eux-mêmes parsables par le parseur existant
+    const ex = p.systemPrompt.split('\n').filter((l) => /^(relation|evenement|objectif|preference|lieu)\|/.test(l));
+    assert.ok(ex.length >= 4);
+    const parsed = core.parseExtraction(ex.join('\n'), 10);
+    assert.equal(parsed.length, ex.length);
+    for (const e of parsed) { const w = e.text.split(/\s+/).length; assert.ok(w >= 10 && w <= 25, `${w} mots : ${e.text}`); assert.ok(!/["«»]/.test(e.text)); }
+    assert.match(p.prompt, /Souvenirs déjà connus[^\n]*\n- Léo est forgeron à Valmont\.\n- Mara se méfie de Théo\./);
+    assert.match(p.prompt, /Messages :\nLéo: Bonjour Mara\.\nMara: Salut\./);
+    assert.ok(!/Souvenirs déjà connus/.test(core.buildExtractionPrompt(msgs, {}).prompt));
+});
+t('compactExisting plafonne en caractères', () => {
+    const l = core.compactExisting(Array.from({ length: 50 }, (_, i) => `Souvenir numéro ${i} ` + 'mot '.repeat(50)), { maxChars: 800, lineChars: 100 });
+    assert.ok(l.length >= 3 && l.length < 10); assert.ok(l.every((x) => x.length <= 101)); assert.ok(l.join('').length <= 800);
+});
+t('copyReason : guillemets et phrases recopiées', () => {
+    const chat = [{ mes: 'Alors voilà, je pense que nous devrions partir demain matin avant le lever du soleil, dit Léo.' }];
+    assert.equal(core.copyReason('Léo propose de partir demain à l’aube, avant que le village ne se réveille.', chat), '');
+    assert.equal(core.copyReason('Léo dit : « partons »', chat), 'guillemets');
+    assert.equal(core.copyReason('Je te promets de revenir bientôt', []), 'première personne');
+    assert.equal(core.copyReason('Mara a juré à Léo de revenir bientôt le chercher au village', []), '');
+    assert.equal(core.copyReason('Alors voilà je pense que nous devrions partir demain matin avant le lever', chat), 'phrase recopiée');
+});
+t('analyse locale : faits structurés reformulés, le reste = extrait brut signalé', () => {
+    const M = (name, mes, idx = 0) => ({ name, mes, idx, is_user: false });
+    const msgs = [M('Léo', "Je m'appelle Léo Durand et j'adore les pommes rouges. J'habite à Valmont avec ma sœur."), M('Mara', "J'aime te voir sourire. Je te promets de revenir le 12 mars. Je suis allergique aux noix, mais tant pis. Je déteste le café froid !"), M('Léo', 'Appelle-moi Rex.')];
+    const all = core.heuristicExtract(msgs);
+    const texts = all.map((x) => x.text);
+    assert.ok(texts.includes('Léo adore les pommes rouges.'));
+    assert.ok(texts.includes('Léo habite à Valmont.'));
+    assert.ok(texts.includes('Mara est allergique aux noix.'));
+    assert.ok(texts.includes('Mara déteste le café froid.'));
+    assert.ok(texts.includes('Le nom complet de Léo est Léo Durand.'));
+    assert.ok(texts.includes('Léo se présente sous le nom de Rex.'));
+    for (const f of all.filter((x) => !x.raw)) assert.ok(!/\b(je|j'|tu|te|t')\b/i.test(f.text), 'pas de 1ʳᵉ personne : ' + f.text);
+    const raws = all.filter((x) => x.raw);
+    assert.ok(raws.length >= 1 && raws.every((x) => x.raw === 'extrait'));
+    assert.ok(raws.some((x) => /promets/.test(x.text)));
+    assert.ok(!all.some((x) => /sourire/.test(x.text) && !x.raw), '« j’aime te voir » n’est pas un goût');
+    // auto : jamais de phrase brute
+    const auto = core.heuristicExtract(msgs, { raw: false });
+    assert.ok(auto.length >= 5 && auto.every((x) => !x.raw));
+    assert.equal(core.heuristicExtract([M('Mara', 'Je te promets de revenir le 12 mars.')], { raw: false }).length, 0);
+});
+t('résumé de scène : prompt + nettoyage de la réponse', () => {
+    const p = core.buildScenePrompt([{ name: 'Léo', mes: 'Salut' }]);
+    assert.match(p.systemPrompt, /résumes la scène récente/); assert.match(p.systemPrompt, /2 à 4 phrases/); assert.match(p.prompt, /Messages :\nLéo: Salut/);
+    assert.equal(core.parseSceneSummary('<think>hmm</think>Résumé : « Léo et Mara quittent Valmont. Ils jurent de revenir. »'), 'Léo et Mara quittent Valmont. Ils jurent de revenir.');
+    assert.equal(core.parseSceneSummary(''), '');
+    assert.ok(core.parseSceneSummary('Phrase. '.repeat(200)).length <= 600);
+});
 console.log(n, 'tests OK');

@@ -214,18 +214,22 @@ function toMsgs(from, to) {
     return out;
 }
 
-export function scanMessages(from, to, { notify = false } = {}) {
+/**
+ * Analyse locale gratuite. Elle ne sait PAS résumer : faits structurés fiables (reformulés) + — si `raw` — phrases brutes
+ * signalées « extrait brut, à reformuler » (jamais acceptées d'un tap). `raw: false` = faits structurés seulement (détection automatique).
+ */
+export function scanMessages(from, to, { notify = false, raw = true } = {}) {
     const s = S();
-    const found = core.heuristicExtract(toMsgs(from, to), { minScore: s.heuristicsMinScore });
+    const found = core.heuristicExtract(toMsgs(from, to), { minScore: s.heuristicsMinScore, raw });
     let added = 0;
     const chat = ctx().chat || [];
     for (const f of found) {
         const msg = chat[f.idx];
         const scope = targetScopeFor(msg);
         if (!scope) continue;
-        if (st.addCandidate({ ...f, scope, origin: 'heuristique', src: { idx: f.idx, chat: ctx().getCurrentChatId?.() ?? null } })) added++;
+        if (st.addCandidate({ ...f, scope, origin: 'local', src: { idx: f.idx, chat: ctx().getCurrentChatId?.() ?? null } })) added++;
     }
-    if (notify) st.toast(added ? 'success' : 'info', added ? `${added} candidat(s) trouvé(s) (analyse locale, gratuite)` : 'Aucun nouveau candidat trouvé');
+    if (notify) st.toast(added ? 'success' : 'info', added ? `${added} candidat(s) trouvé(s) (analyse locale gratuite : faits simples + extraits bruts à reformuler)` : 'Aucun nouveau candidat trouvé');
     return added;
 }
 
@@ -249,7 +253,7 @@ export function scanNew() {
     initChatCursors();
     const last = (ctx().chat?.length || 0) - 1;
     const from = Math.max(cd.heurIdx + 1, last - 3);
-    const n = last >= from ? scanMessages(from, last) : 0;
+    const n = last >= from ? scanMessages(from, last, { raw: false }) : 0; // auto : seulement des faits reformulés, pas de phrases brutes
     cd.heurIdx = last;
     st.saveChatData();
     return n;
@@ -295,6 +299,16 @@ function isEmptyAnswer(text) {
     return !core.stripModelNoise(text).trim();
 }
 
+/** Souvenirs déjà connus du contexte courant (+ candidats en attente), pour que l'IA ne les répète pas. Plus importants / récents d'abord. */
+export function knownMemoryTexts() {
+    const keys = st.viewerScopes().map((x) => x.key);
+    const items = [];
+    for (const k of keys) for (const m of st.getList(k, false)) if (!m.archived && !m.summary) items.push({ text: m.text, imp: m.importance || 3, at: m.created || 0 });
+    for (const c of st.candidatesFor(keys)) items.push({ text: c.text, imp: c.importance || 3, at: c.created || 0 });
+    items.sort((a, b) => b.imp - a.imp || b.at - a.at);
+    return items.map((i) => i.text);
+}
+
 /** Prépare l'extraction : derniers messages, tronqués au budget de tokens d'entrée (les plus anciens sont retirés d'abord). */
 async function prepareExtraction(manual, { short = false } = {}) {
     const s = S();
@@ -307,15 +321,16 @@ async function prepareExtraction(manual, { short = false } = {}) {
     let msgs = toMsgs(Math.max(0, last - n * 2 - 20), last).slice(-n)
         .map((m) => ({ name: m.name, mes: m.mes, idx: m.idx, is_user: m.is_user, original_avatar: m.original_avatar }));
     const total = msgs.length;
-    let p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars });
+    const existing = core.compactExisting(knownMemoryTexts(), { maxChars: short ? 600 : 1600 });
+    let p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars, existing });
     let input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
     for (let i = 0; i < 12 && input > budget && (msgs.length > 2 || msgChars > 100); i++) {
         if (msgs.length > 2) msgs = msgs.slice(-Math.max(2, Math.min(msgs.length - 1, Math.floor(msgs.length * (budget / input) * 0.95))));
         else msgChars = Math.max(100, Math.floor(msgChars / 2));
-        p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars });
+        p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars, existing });
         input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
     }
-    return { msgs, p, input, dropped: total - msgs.length, msgChars };
+    return { msgs, p, input, dropped: total - msgs.length, msgChars, known: existing.length };
 }
 
 /** Estimation (sans appel) du coût d'une extraction maintenant. */
@@ -375,13 +390,73 @@ export async function runExtraction({ manual = false } = {}) {
     const lastMsg = msgs[msgs.length - 1];
     const g = st.currentGroup();
     const scope = g ? `group:${g.id}` : targetScopeFor({ is_user: false, name: ctx().name2, original_avatar: lastMsg.original_avatar });
-    let added = 0;
+    let added = 0; let duplicates = 0; let copied = 0;
+    const known = [...knownMemoryTexts().map((text) => ({ text }))]; // doublon de sens avec N'IMPORTE QUELLE portée visible + ce qui vient d'être ajouté
     for (const it of items) {
         const src = { idx: lastMsg.idx, chat: ctx().getCurrentChatId?.() ?? null };
-        if (s.autoToInbox) { if (st.addCandidate({ ...it, scope, origin: 'ia', src })) added++; }
-        else if (st.addMemory(scope, { ...it, src }, { allowDuplicate: false }).entry) added++;
+        if (core.isNearDuplicate(it.text, known, 0.6)) { duplicates++; continue; }
+        // garde-fou : un « souvenir » qui recopie le chat (guillemets, suite de 10 mots identique, phrase à la 1ʳᵉ personne) n'est jamais ajouté directement
+        const copy = core.copyReason(it.text, msgs) ? 'copie' : '';
+        if (copy) copied++;
+        let ok = false;
+        if (s.autoToInbox || copy) ok = !!st.addCandidate({ ...it, scope, origin: 'ia', raw: copy, src });
+        else ok = !!st.addMemory(scope, { ...it, src }, { allowDuplicate: false }).entry;
+        if (ok) { added++; known.push({ text: it.text }); } else duplicates++;
     }
-    return { ok: true, added, found: items.length, retried, messages: msgs.length, inputTokens: inTok, outTokens: outTok, raw: r.text };
+    return { ok: true, added, found: items.length, duplicates, copied, retried, messages: msgs.length, inputTokens: inTok, outTokens: outTok, raw: r.text };
+}
+
+/** Prépare le résumé de scène : N derniers messages, tronqués au budget d'entrée (les plus anciens d'abord). */
+async function prepareScene() {
+    const s = S();
+    const chat = ctx().chat || [];
+    const last = chat.length - 1;
+    let msgChars = 700;
+    const budget = Math.max(300, Math.round(s.extractInputTokens));
+    let msgs = toMsgs(Math.max(0, last - s.sceneMessages * 2 - 20), last).slice(-s.sceneMessages)
+        .map((m) => ({ name: m.name, mes: m.mes, idx: m.idx, is_user: m.is_user, original_avatar: m.original_avatar }));
+    let p = core.buildScenePrompt(msgs, { msgChars });
+    let input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
+    for (let i = 0; i < 12 && input > budget && (msgs.length > 2 || msgChars > 100); i++) {
+        if (msgs.length > 2) msgs = msgs.slice(-Math.max(2, Math.min(msgs.length - 1, Math.floor(msgs.length * (budget / input) * 0.95))));
+        else msgChars = Math.max(100, Math.floor(msgChars / 2));
+        p = core.buildScenePrompt(msgs, { msgChars });
+        input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
+    }
+    return { msgs, p, input };
+}
+
+/** Estimation (sans appel) du coût d'un résumé de scène maintenant. */
+export async function estimateScene() {
+    const prep = await prepareScene();
+    return { input: prep.input, output: S().autoMaxTokens, messages: prep.msgs.length };
+}
+
+/**
+ * « Résumer les derniers messages » : UN appel IA → UN candidat de type événement (2 à 4 phrases), à valider.
+ * Mêmes plafonds que le reste (jour / mois / budget) ; pas de 2ᵉ essai automatique (il coûterait un appel de plus).
+ */
+export async function runSceneSummary() {
+    const s = S();
+    const cd = st.chatData(true);
+    if (!cd) return { ok: false, reason: 'Aucun chat ouvert' };
+    if (!s.enabled) return { ok: false, reason: 'Extension désactivée' };
+    if (state.running) return { ok: false, reason: 'Un appel de mémoire est déjà en cours' };
+    const prep = await prepareScene();
+    if (!prep.msgs.length) return { ok: false, reason: 'Aucun message à résumer' };
+    const r = await callAI('Résumé de scène', { ...prep.p, responseLength: s.autoMaxTokens });
+    if (!r.ok) return r;
+    const text = core.parseSceneSummary(r.text);
+    if (!text) {
+        return { ok: false, empty: true, reason: 'Réponse vide de l’IA', inputTokens: r.inputTokens, outTokens: r.outTokens, detail: emptyExplanation({ retried: false, messages: prep.msgs.length, maxTokens: s.autoMaxTokens }).replace('Rien n’a été mémorisé.', 'Rien n’a été mémorisé (pas de nouvel essai automatique pour ne pas dépenser un 2ᵉ appel ; relance si tu veux).') };
+    }
+    const lastMsg = prep.msgs[prep.msgs.length - 1];
+    const g = st.currentGroup();
+    const scope = g ? `group:${g.id}` : targetScopeFor({ is_user: false, name: ctx().name2, original_avatar: lastMsg.original_avatar });
+    if (!scope) return { ok: false, reason: 'Aucune portée où ranger le résumé' };
+    const copy = core.copyReason(text, prep.msgs) ? 'copie' : '';
+    const cand = st.addCandidate({ text, type: 'evenement', importance: 3, keywords: core.autoKeywords(text, 5), scope, origin: 'ia', raw: copy, src: { idx: lastMsg.idx, chat: ctx().getCurrentChatId?.() ?? null } });
+    return { ok: true, added: cand ? 1 : 0, duplicate: !cand, text, messages: prep.msgs.length, inputTokens: r.inputTokens, outTokens: r.outTokens };
 }
 
 /** Résumé glissant : UN souvenir « résumé » par chat, mis à jour rarement. */

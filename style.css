@@ -115,3 +115,5 @@ body.pmem-lock { overscroll-behavior: none; }
 .pmem-diag, .pmem-test { margin: 8px 0; }
 .pmem-why { font-size: .9em; padding: 2px 0; line-height: 1.35; }
 .pmem-testbox { margin-bottom: 8px; }
+#pmem-sheet .pmem-card.raw { border-style: dashed; opacity: .95; }
+#pmem-sheet .pmem-rawtag { display: inline-block; margin: 2px 0 4px; padding: 1px 8px; border-radius: 9px; background: rgba(230, 150, 30, .22); border: 1px solid rgba(230, 150, 30, .6); font-size: .8em; }
