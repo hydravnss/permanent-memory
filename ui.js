@@ -45,7 +45,9 @@ const FIELDS = [
     { key: 'autoExtract', type: 'check', label: 'Extraction automatique toutes les N messages' },
     { key: 'autoEvery', type: 'num', label: 'N = intervalle (messages)', min: 2, max: 100 },
     { key: 'autoMaxItems', type: 'num', label: 'Faits max par extraction', min: 1, max: 10 },
-    { key: 'autoMaxTokens', type: 'num', label: 'Réponse de l’IA : tokens max', min: 50, max: 1000, step: 10 },
+    { key: 'extractMessages', type: 'num', label: 'Nombre de messages à analyser (bouton « Extraire avec l’IA »)', min: 4, max: 200 },
+    { key: 'extractInputTokens', type: 'num', label: 'Extraction : budget d’entrée max (tokens ; on retire les plus anciens messages au-delà)', min: 500, max: 20000, step: 500 },
+    { key: 'autoMaxTokens', type: 'num', label: 'Réponse de l’IA : tokens max (400+ conseillé ; 1500+ avec un modèle à réflexion)', min: 50, max: 4000, step: 50 },
     { key: 'autoToInbox', type: 'check', label: 'Envoyer dans la boîte « Candidats » (sinon ajout direct)' },
     { key: 'maxCallsPerDay', type: 'num', label: 'Plafond d’appels par jour (0 = bloqué)', min: 0, max: 100 },
     { key: 'maxTokensPerMonth', type: 'num', label: 'Plafond de tokens par mois, estimé (0 = bloqué)', min: 0, max: 5000000, step: 1000 },
@@ -317,7 +319,7 @@ function renderCand() {
 <button type="button" class="menu_button" data-act="rejectall"${list.length ? '' : ' disabled'}>✗ Tout rejeter</button>
 </div>`;
     h += `<div class="pmem-bar">${aiButton('extract', '🤖 Extraire avec l’IA (1 appel)')}</div>`;
-    if (ui.lastResult) h += `<div class="pmem-note">${esc(ui.lastResult)}</div>`;
+    if (ui.lastResult) h += `<div class="pmem-note">${esc(ui.lastResult).replace(/\n/g, '<br>')}</div>`;
     if (!list.length) return h + '<div class="pmem-empty">Aucun candidat en attente 🎉</div>';
     return h + list.map((c) => `<div class="pmem-card cand" data-id="${c.id}">
 <div class="pmem-card-top"><span class="pmem-type">${core.TYPE_ICONS[c.type] || ''} ${esc(core.TYPES[c.type] || c.type)}</span><span class="pmem-meta">${c.origin === 'ia' ? '🤖 IA' : '🧮 local'} · ${esc(st.scopeLabel(c.scope))} · ★${c.importance}</span></div>
@@ -492,7 +494,7 @@ async function onSheetClick(e) {
             if (ui.armed !== 'extract') { const est = await eng.estimateExtraction(); arm('extract', est.input + est.output); renderSheet(); break; }
             ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Extraction…';
             const r = await eng.runExtraction({ manual: true });
-            ui.lastResult = r.ok ? `Extraction IA : ${r.found} fait(s) trouvé(s), ${r.added} nouveau(x) candidat(s) · ≈ ${r.inputTokens + r.outTokens} tokens.` : `Extraction non effectuée : ${r.reason}`;
+            ui.lastResult = r.ok ? `Extraction IA : ${r.found} fait(s) trouvé(s) dans ${r.messages} message(s), ${r.added} nouveau(x) candidat(s) · ≈ ${r.inputTokens + r.outTokens} tokens${r.retried ? ' (1ʳᵉ réponse vide → 2ᵉ essai plus court réussi)' : ''}.` : `Extraction non effectuée : ${r.detail || r.reason}`;
             if (!r.ok) st.toast('warning', r.reason);
             renderSheet(); break;
         }

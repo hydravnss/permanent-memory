@@ -276,6 +276,8 @@ async function callAI(kind, { systemPrompt, prompt, responseLength }) {
         try {
             raw = await ctx().generateRaw({ prompt, systemPrompt, responseLength });
         } catch (e) { err = e; }
+        // generateRaw lève « No message generated » quand la réponse est vide : ce n'est pas une panne d'API, on le traite comme une réponse vide
+        if (err && /no message generated/i.test(String(err?.message || err))) { err = null; raw = ''; }
         const out = typeof raw === 'string' ? raw : '';
         const outTokens = await countTokens(out);
         st.recordCall(inputTokens + outTokens);
@@ -288,38 +290,85 @@ async function callAI(kind, { systemPrompt, prompt, responseLength }) {
     }
 }
 
-/** Estimation (sans appel) du coût d'une extraction maintenant. */
-export async function estimateExtraction() {
-    const s = S();
-    const msgs = pickExtractionMessages(true);
-    const p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars: s.autoMsgChars });
-    const input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
-    return { input, output: s.autoMaxTokens, messages: msgs.length };
+/** Vrai si la réponse ne contient rien d'exploitable (vide, ou uniquement de la « réflexion »). */
+function isEmptyAnswer(text) {
+    return !core.stripModelNoise(text).trim();
 }
 
-function pickExtractionMessages(manual) {
+/** Prépare l'extraction : derniers messages, tronqués au budget de tokens d'entrée (les plus anciens sont retirés d'abord). */
+async function prepareExtraction(manual, { short = false } = {}) {
     const s = S();
-    const cd = st.chatData(true);
     const chat = ctx().chat || [];
     const last = chat.length - 1;
-    const n = manual ? Math.max(s.autoEvery, 6) : s.autoEvery;
-    const from = Math.max(0, last - n + 1);
-    const pool = toMsgs(from, last);
-    return pool.slice(-n).map((m) => ({ name: m.name, mes: m.mes, idx: m.idx, is_user: m.is_user, original_avatar: m.original_avatar }));
+    let n = manual ? Math.max(4, s.extractMessages) : Math.max(2, s.autoEvery);
+    if (short) n = Math.max(4, Math.min(12, Math.ceil(n / 3)));
+    let msgChars = short ? Math.min(250, s.autoMsgChars) : s.autoMsgChars;
+    const budget = Math.max(300, Math.round(s.extractInputTokens * (short ? 0.5 : 1)));
+    let msgs = toMsgs(Math.max(0, last - n * 2 - 20), last).slice(-n)
+        .map((m) => ({ name: m.name, mes: m.mes, idx: m.idx, is_user: m.is_user, original_avatar: m.original_avatar }));
+    const total = msgs.length;
+    let p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars });
+    let input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
+    for (let i = 0; i < 12 && input > budget && (msgs.length > 2 || msgChars > 100); i++) {
+        if (msgs.length > 2) msgs = msgs.slice(-Math.max(2, Math.min(msgs.length - 1, Math.floor(msgs.length * (budget / input) * 0.95))));
+        else msgChars = Math.max(100, Math.floor(msgChars / 2));
+        p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars });
+        input = await countTokens(`${p.systemPrompt}\n${p.prompt}`);
+    }
+    return { msgs, p, input, dropped: total - msgs.length, msgChars };
 }
 
-/** Extraction groupée par l'IA : UN appel pour les N derniers messages. */
+/** Estimation (sans appel) du coût d'une extraction maintenant. */
+export async function estimateExtraction() {
+    const prep = await prepareExtraction(true);
+    return { input: prep.input, output: S().autoMaxTokens, messages: prep.msgs.length };
+}
+
+function emptyExplanation({ retried, messages, maxTokens }) {
+    const where = retried ? 'même après un nouvel essai avec un prompt plus court' : 'sans nouvel essai';
+    return `Réponse vide de l’IA (${where} : ${messages} message(s) envoyé(s), ${maxTokens} tokens de réponse max). Rien n’a été mémorisé.\n`
+        + 'Causes probables :\n'
+        + '• Modèle à réflexion (DeepSeek reasoner/R1, o1, Gemini Pro…) : la réflexion consomme tous les tokens et laisse la réponse vide → augmente « Réponse de l’IA : tokens max » (1500 ou plus) ou utilise un modèle sans réflexion (ex. deepseek-chat).\n'
+        + '• Contexte trop grand pour le modèle → réduis « Nombre de messages à analyser » (essaie 10 à 20).\n'
+        + '• Filtre de contenu du fournisseur (scènes de RP) ou erreur silencieuse du proxy → réessaie avec moins de messages.\n'
+        + 'L’analyse locale gratuite (🧮) reste disponible.';
+}
+
+/** Extraction groupée par l'IA : UN appel pour les N derniers messages (un seul 2ᵉ essai, plus court, si la réponse est vide). */
 export async function runExtraction({ manual = false } = {}) {
     const s = S();
     const cd = st.chatData(true);
     if (!cd) return { ok: false, reason: 'Aucun chat ouvert' };
     if (!s.enabled) return { ok: false, reason: 'Extension désactivée' };
     if (state.running) return { ok: false, reason: 'Un appel de mémoire est déjà en cours' };
-    const msgs = pickExtractionMessages(manual);
-    if (!msgs.length) return { ok: false, reason: 'Aucun message à analyser' };
-    const p = core.buildExtractionPrompt(msgs, { maxItems: s.autoMaxItems, msgChars: s.autoMsgChars });
-    const r = await callAI('Extraction', { ...p, responseLength: s.autoMaxTokens });
+    let prep = await prepareExtraction(manual);
+    if (!prep.msgs.length) return { ok: false, reason: 'Aucun message à analyser' };
+    let maxTokens = s.autoMaxTokens;
+    let r = await callAI('Extraction', { ...prep.p, responseLength: maxTokens });
+    let retried = false;
+    let inTok = r.inputTokens || 0;
+    let outTok = r.outTokens || 0;
+    if (r.ok && isEmptyAnswer(r.text)) {
+        // 2ᵉ essai unique : prompt plus court + plus de place pour la réponse (un modèle à réflexion en a besoin)
+        retried = true;
+        prep = await prepareExtraction(manual, { short: true });
+        maxTokens = Math.max(800, Math.min(2000, s.autoMaxTokens * 4));
+        console.warn(LOG, 'Réponse vide, nouvel essai avec', prep.msgs.length, 'message(s) et', maxTokens, 'tokens max');
+        const r2 = await callAI('Extraction (2ᵉ essai)', { ...prep.p, responseLength: maxTokens });
+        if (!r2.ok) {
+            const why = String(r2.reason || '');
+            return { ok: false, empty: true, reason: `Réponse vide de l’IA ; nouvel essai impossible : ${why}`, detail: `${emptyExplanation({ retried: false, messages: prep.msgs.length, maxTokens })}\nNouvel essai non effectué : ${why}` };
+        }
+        r = r2;
+        inTok += r2.inputTokens || 0;
+        outTok += r2.outTokens || 0;
+    }
     if (!r.ok) return r;
+    if (isEmptyAnswer(r.text)) {
+        if (!manual) { cd.lastExtractIdx = (ctx().chat?.length || 1) - 1; st.saveChatData(); } // auto : pas de boucle d'appels
+        return { ok: false, empty: true, retried, reason: 'Réponse vide de l’IA (voir les causes probables ci-dessous)', detail: emptyExplanation({ retried, messages: prep.msgs.length, maxTokens }) };
+    }
+    const msgs = prep.msgs;
     cd.lastExtractIdx = (ctx().chat?.length || 1) - 1; // avancé même si 0 résultat : jamais de ré-essai automatique
     st.saveChatData();
     const items = core.parseExtraction(r.text, s.autoMaxItems);
@@ -332,7 +381,7 @@ export async function runExtraction({ manual = false } = {}) {
         if (s.autoToInbox) { if (st.addCandidate({ ...it, scope, origin: 'ia', src })) added++; }
         else if (st.addMemory(scope, { ...it, src }, { allowDuplicate: false }).entry) added++;
     }
-    return { ok: true, added, found: items.length, inputTokens: r.inputTokens, outTokens: r.outTokens, raw: r.text };
+    return { ok: true, added, found: items.length, retried, messages: msgs.length, inputTokens: inTok, outTokens: outTok, raw: r.text };
 }
 
 /** Résumé glissant : UN souvenir « résumé » par chat, mis à jour rarement. */
@@ -351,7 +400,7 @@ export async function runSummary({ manual = false } = {}) {
     if (!r.ok) return r;
     const text = core.cleanText(r.text).slice(0, 600);
     cd.lastSummaryIdx = last;
-    if (!text) { st.saveChatData(); return { ok: false, reason: 'Réponse vide de l’IA' }; }
+    if (!text) { st.saveChatData(); return { ok: false, empty: true, reason: 'Réponse vide de l’IA', detail: 'Réponse vide de l’IA. Causes probables : modèle à réflexion (augmente « Taille max du résumé » à 1000), ou contexte/filtre du fournisseur. Rien n’a été modifié.' }; }
     if (mem) { mem.text = text; mem.lastUsed = mem.lastUsed; }
     else cd.memories.push(core.makeMemory({ text, type: 'resume', importance: 5, pinned: true, summary: true, keywords: [] }, new Set()));
     st.saveChatData();
@@ -384,6 +433,7 @@ async function autoTick() {
         if (s.autoExtract && !s.neverAI && last - (cd.lastExtractIdx ?? last) >= s.autoEvery) {
             const r = await runExtraction({ manual: false });
             if (r.ok) st.toast('info', `Mémoire : ${r.added} candidat(s) ajouté(s) par l’IA (${r.inputTokens + r.outTokens} tokens)`);
+            else if (r.empty) st.toast('warning', `Mémoire : ${r.reason}. Ouvre l’onglet Candidats pour les causes probables.`);
         }
         if (s.autoSummary && !s.neverAI && last - (cd.lastSummaryIdx ?? -1) >= s.summaryEvery) {
             const r = await runSummary({ manual: false });

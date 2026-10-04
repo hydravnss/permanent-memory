@@ -48,7 +48,9 @@ export const DEFAULTS = Object.freeze({
     autoExtract: false,
     autoEvery: 10,
     autoMaxItems: 4,
-    autoMaxTokens: 200,
+    autoMaxTokens: 400, // large : un modèle « à réflexion » (DeepSeek reasoner…) consomme ces tokens avant de répondre
+    extractMessages: 40, // extraction manuelle : nombre de derniers messages analysés
+    extractInputTokens: 3000, // extraction : budget d’entrée (les plus anciens messages sont retirés au-delà)
     autoMsgChars: 400,
     autoToInbox: true,
     maxCallsPerDay: 5,
@@ -83,7 +85,7 @@ export const PRESETS = Object.freeze({
 
 const NUM = {
     maxMemories: [1, 30], maxTokens: [50, 3000], scanDepth: [1, 10], position: [0, 2], depth: [0, 50], role: [0, 2],
-    heuristicsMinScore: [1, 6], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 1000], autoMsgChars: [100, 2000],
+    heuristicsMinScore: [1, 6], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 4000], extractMessages: [4, 200], extractInputTokens: [500, 20000], autoMsgChars: [100, 2000],
     maxCallsPerDay: [0, 100], maxTokensPerMonth: [0, 5000000], summaryEvery: [10, 500], summaryMaxTokens: [50, 1000], archiveDays: [7, 730],
     floatX: [0, 100], floatY: [0, 100], floatSize: [34, 90],
 };

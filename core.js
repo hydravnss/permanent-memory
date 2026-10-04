@@ -407,13 +407,78 @@ export function buildSummaryPrompt(previous, messages, { maxWords = 120, msgChar
     return { systemPrompt: system, prompt: `${previous ? `Résumé actuel :\n${previous}\n\n` : ''}Nouveaux messages :\n${body}\n\nRésumé mis à jour :` };
 }
 
+/** Retire la « réflexion » du modèle (<think>…</think>, bloc non fermé = tout est réflexion) et les clôtures ``` . */
+export function stripModelNoise(raw) {
+    let text = String(raw ?? '');
+    text = text.replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, '');
+    text = text.replace(/<(think|thinking|reasoning)>[\s\S]*$/i, ''); // réflexion tronquée : rien d'exploitable après
+    text = text.replace(/^[\s\S]*?<\/(think|thinking|reasoning)>/i, ''); // balise ouvrante perdue par le serveur
+    return text.replace(/```[a-zA-Z0-9_-]*/g, '\n').trim();
+}
+
+const JSON_LIST_KEYS = ['faits', 'souvenirs', 'memories', 'facts', 'items', 'resultats', 'résultats', 'results', 'data'];
+
+function tryParseJson(s) {
+    try { return JSON.parse(s); } catch { return undefined; }
+}
+
+/** Cherche un tableau JSON dans un texte (tolérant : texte autour, objet enveloppe, virgule finale). */
+export function findJsonList(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return null;
+    const cands = [t];
+    const a0 = t.indexOf('['); const a1 = t.lastIndexOf(']');
+    if (a0 >= 0 && a1 > a0) cands.push(t.slice(a0, a1 + 1));
+    const o0 = t.indexOf('{'); const o1 = t.lastIndexOf('}');
+    if (o0 >= 0 && o1 > o0) cands.push(t.slice(o0, o1 + 1));
+    for (const c of cands) {
+        const v = tryParseJson(c) ?? tryParseJson(c.replace(/,\s*([\]}])/g, '$1'));
+        if (Array.isArray(v)) return v;
+        if (v && typeof v === 'object') {
+            for (const k of JSON_LIST_KEYS) if (Array.isArray(v[k])) return v[k];
+            const first = Object.values(v).find(Array.isArray);
+            if (first) return first;
+        }
+    }
+    return null;
+}
+
+function itemFromJson(e) {
+    if (typeof e === 'string') return { body: e, type: 'fait', imp: 3, kws: [] };
+    if (!e || typeof e !== 'object') return null;
+    const body = e.text ?? e.fait ?? e.fact ?? e.souvenir ?? e.memory ?? e.content ?? e.contenu ?? '';
+    let kws = e.keywords ?? e.mots_cles ?? e.motsCles ?? e['mots-clés'] ?? e.mots ?? [];
+    if (typeof kws === 'string') kws = kws.split(/[,;]/);
+    if (!Array.isArray(kws)) kws = [];
+    return { body: String(body), type: normType(e.type ?? e.categorie ?? 'fait'), imp: clampInt(e.importance ?? e.imp ?? e.score, 1, 5, 3), kws: kws.map((k) => String(k).trim()).filter(Boolean) };
+}
+
+const PREAMBLE = /^(voici|here\b|ci-dessous|faits? (à|a) retenir|résultat|resultat|réponse|reponse|ok\b|d'accord|bien sûr|bien sur|sure\b)/i;
+
 export function parseExtraction(raw, maxItems = 6) {
     const out = [];
-    const text = String(raw ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '');
-    if (/^\s*rien\s*\.?\s*$/i.test(text)) return out;
+    const text = stripModelNoise(raw);
+    if (!text || /^\s*rien\s*\.?\s*$/i.test(text)) return out;
+    const push = (body, type, imp, kws) => {
+        body = cleanText(body).replace(/^["«]|["»]$/g, '');
+        if (body.length < 6) return false;
+        out.push({ text: body.slice(0, 300), type, importance: imp, keywords: kws.slice(0, 5) });
+        return out.length >= maxItems;
+    };
+    // 1) JSON (tableau, objet enveloppe, texte autour)
+    const list = /[\[{]/.test(text) ? findJsonList(text) : null;
+    if (list) {
+        for (const e of list) {
+            const it = itemFromJson(e);
+            if (it && push(it.body, it.type, it.imp, it.kws)) break;
+        }
+        return out;
+    }
+    // 2) lignes « type|importance|fait|mots-clés »
     for (let line of text.split(/\n+/)) {
         line = line.trim().replace(/^[-*•\d.)\s]+/, '').trim();
         if (!line || /^rien\b/i.test(line)) continue;
+        if (!line.includes('|') && (/[:：]\s*$/.test(line) || PREAMBLE.test(line) || /^[\[\]{}(),]+$/.test(line))) continue;
         let type = 'fait';
         let imp = 3;
         let body = line;
@@ -432,10 +497,7 @@ export function parseExtraction(raw, maxItems = 6) {
                 body = parts.join(' ');
             }
         }
-        body = cleanText(body).replace(/^["«]|["»]$/g, '');
-        if (body.length < 6) continue;
-        out.push({ text: body.slice(0, 300), type, importance: imp, keywords: kws.slice(0, 5) });
-        if (out.length >= maxItems) break;
+        if (push(body, type, imp, kws)) break;
     }
     return out;
 }

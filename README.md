@@ -9,6 +9,17 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.0.2 — extraction IA fiable (« No message generated »)
+
+Le bouton **« Extraire avec l'IA »** pouvait afficher *« Erreur de l'API : No message generated »*. SillyTavern lève cette erreur quand la réponse du modèle est **vide**. Cause la plus probable : un **modèle à réflexion** (DeepSeek reasoner/R1, o1…) dont la réflexion consomme les 200 tokens de réponse autorisés et laisse le texte final vide (aussi possible : contexte trop grand, filtre du fournisseur). Corrigé :
+- nouveau réglage **« Nombre de messages à analyser »** (40 par défaut) + **budget d'entrée en tokens** (3000) : les plus anciens messages sont retirés d'abord ;
+- réponse max par défaut portée à **400 tokens** (réglable jusqu'à 4000) ;
+- si la réponse est vide : **un seul nouvel essai** avec moins de messages et plus de place pour répondre (les 2 appels comptent dans les plafonds) ;
+- si c'est encore vide : un message clair en français (causes probables, quoi régler) au lieu d'une « erreur d'API » ; rien n'est mémorisé ;
+- analyse de la réponse tolérante : lignes `type|importance|fait|mots-clés`, **JSON** (tableau ou objet), blocs ```, texte autour, balises `<think>`.
+
+Aucun appel IA n'est fait sans ton action (le comportement par défaut reste 100 % local).
+
 ## Mise à jour 1.0.1 — correctif groupes
 
 Dans un chat de **groupe**, des souvenirs épinglés pouvaient ne **jamais** être injectés (« 0 / 400 tokens · 0 souvenir(s) sur 0 »). Cause : en 1.0.0 le réglage par défaut isolait les souvenirs **du seul perso qui parle** ; si ce perso (ou, hors génération, la fiche de membre ouverte) n'avait pas de souvenir à lui, les souvenirs attribués aux autres membres restaient hors du prompt. Corrigé : tous les membres sont injectés par défaut. **Aucun souvenir n'est perdu** : le fichier `permanent_memory_store.json` est relu tel quel, et une copie de sécurité `permanent_memory_store_backup_avant_1.0.1.json` est écrite une fois au premier chargement.
@@ -34,7 +45,7 @@ Nécessite SillyTavern ≥ 1.12.0. Ensuite : Extensions → **🧠 Mémoire Perm
 | Un « résumé » envoyé à l'IA toutes les X messages | **Désactivé par défaut.** Aucun appel automatique tant que tu ne l'actives pas. |
 | Une base vectorielle / des embeddings (API) | **Aucun embedding.** Sélection locale en JavaScript : mots-clés + BM25 (type TF-IDF) + importance + récence, sur FR/EN (stopwords, racinisation légère, accents/pluriels ignorés). |
 | Tout injecter dans chaque prompt | **Budget strict** : max. N souvenirs **et** max. T tokens (par défaut 6 / 400). Seul ce qui concerne les derniers messages est injecté ; les souvenirs 📌 épinglés sont toujours inclus (mais dans le budget). |
-| Extraire des souvenirs à chaque message | 1 seul appel **groupé** tous les N messages (par défaut OFF, N = 10), réponse plafonnée (200 tokens), prompt court, **plafond d'appels par jour** et **plafond de tokens par mois** *durs* (aucun appel ne part au-delà). |
+| Extraire des souvenirs à chaque message | 1 seul appel **groupé** tous les N messages (par défaut OFF, N = 10), réponse plafonnée (400 tokens), prompt court, **plafond d'appels par jour** et **plafond de tokens par mois** *durs* (aucun appel ne part au-delà). |
 | Tout faire passer par l'IA | Détection **locale gratuite** (regex : « je t'aime », « je te promets », « souviens-toi », noms, dates, événements, préférences…) → **boîte de candidats** : tu valides d'un tap. |
 | Cache de contexte cassé | Position par défaut **dans le chat, profondeur 4** : seuls les derniers messages changent d'un tour à l'autre, le début du prompt reste identique (important pour le **cache de contexte de DeepSeek**, qui ne facture presque rien les débuts de prompt identiques). Éviter « Après/Avant le prompt système », qui change tout le préfixe. |
 
@@ -110,7 +121,7 @@ Dans les actions du message (icône « … »), 🧠 **Mémoriser ce message** :
 | Position | Dans le chat, profondeur 4, rôle système |
 | Détection locale de candidats | ON |
 | **Ne jamais appeler l'IA** | OFF |
-| Extraction auto (tous les N messages) | **OFF** (N = 10, 4 faits max, 200 tokens) |
+| Extraction auto (tous les N messages) | **OFF** (N = 10, 4 faits max, 400 tokens ; manuel : 40 derniers messages) |
 | Plafond d'appels IA / jour · tokens / mois (estimés) | 5 · 30 000 |
 | Résumé glissant auto | **OFF** |
 | Archivage auto | **OFF** |

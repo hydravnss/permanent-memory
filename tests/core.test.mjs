@@ -61,4 +61,21 @@ t('trim message', () => {
     const r = core.trimMessageForMemory(long, 200);
     assert.ok(r.length <= 260 && /promets/.test(r), r);
 });
+t('parseExtraction tolérant : JSON, ```, texte autour, réflexion', () => {
+    const j = '[{"type":"relation","importance":4,"text":"Léo a promis de protéger Mara","keywords":["Léo","Mara"]},{"type":"lieu","text":"Le phare de Valmont sert de refuge"}]';
+    let r = core.parseExtraction(j, 6);
+    assert.equal(r.length, 2); assert.equal(r[0].type, 'relation'); assert.equal(r[0].importance, 4); assert.deepEqual(r[0].keywords, ['Léo', 'Mara']);
+    r = core.parseExtraction('Voici le résultat :\n```json\n' + j + '\n```\nVoilà !', 6);
+    assert.equal(r.length, 2);
+    r = core.parseExtraction('{"faits":[{"fait":"Mara déteste le thé froid","importance":2,},]}', 6);
+    assert.equal(r.length, 1); assert.equal(r[0].text, 'Mara déteste le thé froid');
+    r = core.parseExtraction('<think>je réfléchis | 3 | pas un fait du tout</think>\nVoici les faits :\nfait|3|Léo porte une cape rouge brodée|cape', 6);
+    assert.equal(r.length, 1); assert.equal(r[0].text, 'Léo porte une cape rouge brodée');
+    r = core.parseExtraction('```\nrelation|5|Léo aime Mara depuis la guerre|amour\n```', 6);
+    assert.equal(r.length, 1); assert.equal(r[0].type, 'relation');
+    assert.equal(core.parseExtraction('<think>réflexion tronquée sans fin', 6).length, 0);
+    assert.equal(core.parseExtraction('RIEN', 6).length, 0);
+    assert.equal(core.parseExtraction('["Mara possède une épée runique"]', 6).length, 1);
+    assert.equal(core.stripModelNoise('<think>x</think>  ').length, 0);
+});
 console.log(n, 'tests OK');
