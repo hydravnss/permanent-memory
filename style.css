@@ -1,0 +1,105 @@
+/* Mémoire Permanente — styles. Aucun transform sur un ancêtre ; tout en position:fixed sous <body>. */
+
+/* ---------- panneau de réglages ---------- */
+.pmem-settings .pmem-status { font-size: .9em; opacity: .85; margin: 6px 0 10px; line-height: 1.4; }
+.pmem-settings .pmem-row-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.pmem-settings .pmem-row-btns .menu_button { flex: 1 1 140px; min-height: 40px; margin: 0; }
+.pmem-settings .pmem-sec h4 { margin: 14px 0 6px; padding-top: 8px; border-top: 1px solid var(--SmartThemeBorderColor, #888); }
+.pmem-settings .pmem-field { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; font-size: .95em; }
+.pmem-settings label.checkbox_label.pmem-field { flex-direction: row; align-items: center; gap: 8px; }
+.pmem-settings .pmem-field input[type="number"], .pmem-settings .pmem-field input[type="text"], .pmem-settings .pmem-field select { font-size: 16px; min-height: 38px; }
+.pmem-settings .pmem-field input[type="range"] { width: 100%; min-height: 32px; }
+.pmem-settings .pmem-strong { font-weight: 600; }
+.pmem-settings .pmem-active { outline: 2px solid var(--SmartThemeQuoteColor, #4ae); }
+
+/* ---------- panneau plein écran ---------- */
+body.pmem-lock { overscroll-behavior: none; }
+#pmem-sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 4000; display: none; background: rgba(0, 0, 0, .55); }
+#pmem-sheet.pmem-open { display: block; }
+#pmem-sheet .pmem-panel {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+    max-width: 760px; margin: 0 auto;
+    display: flex; flex-direction: column;
+    background: var(--SmartThemeBlurTintColor, #1c1c1f); color: var(--SmartThemeBodyColor, #ddd);
+    border-left: 1px solid var(--SmartThemeBorderColor, #555); border-right: 1px solid var(--SmartThemeBorderColor, #555);
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+    font-size: 15px;
+}
+#pmem-sheet .pmem-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--SmartThemeBorderColor, #555); }
+#pmem-sheet .pmem-head b { font-size: 1.1em; }
+#pmem-sheet .pmem-sub { flex: 1; opacity: .7; font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pmem-sheet .pmem-x { min-width: 44px; min-height: 44px; font-size: 20px; background: transparent; color: inherit; border: 0; cursor: pointer; }
+#pmem-sheet .pmem-tabs { display: flex; overflow-x: auto; gap: 2px; border-bottom: 1px solid var(--SmartThemeBorderColor, #555); -webkit-overflow-scrolling: touch; }
+#pmem-sheet .pmem-tabs button { flex: 1 0 auto; min-height: 44px; padding: 0 12px; background: transparent; color: inherit; border: 0; border-bottom: 3px solid transparent; font-size: 15px; cursor: pointer; white-space: nowrap; }
+#pmem-sheet .pmem-tabs button.on { border-bottom-color: var(--SmartThemeQuoteColor, #4ae); font-weight: 700; }
+.pmem-badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--SmartThemeQuoteColor, #4ae); color: #000; font-size: 12px; text-align: center; }
+#pmem-sheet .pmem-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 24px; }
+
+#pmem-sheet .pmem-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+#pmem-sheet .pmem-filters #pmem-q { grid-column: 1 / -1; }
+#pmem-sheet .pmem-filters select:first-child { grid-column: 1 / -1; }
+#pmem-sheet input.text_pole, #pmem-sheet select.text_pole, #pmem-sheet textarea.text_pole, #pmem-dialog .text_pole { font-size: 16px; min-height: 40px; box-sizing: border-box; }
+#pmem-sheet .pmem-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
+#pmem-sheet .pmem-bar .menu_button { margin: 0; min-height: 40px; flex: 0 1 auto; }
+#pmem-sheet .pmem-bar input.text_pole, #pmem-sheet .pmem-bar select.text_pole { flex: 1 1 160px; margin: 0; }
+#pmem-sheet .menu_button.pmem-armed { background: #a33; color: #fff; }
+#pmem-sheet .menu_button.danger, #pmem-dialog .danger { border-color: #c55; }
+#pmem-sheet .pmem-count { opacity: .75; font-size: .9em; }
+#pmem-sheet .pmem-note { font-size: .88em; opacity: .85; margin: 6px 0; line-height: 1.4; }
+#pmem-sheet .pmem-warn { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: rgba(255, 170, 0, .18); border: 1px solid rgba(255, 170, 0, .6); font-size: .9em; }
+#pmem-sheet .pmem-empty { text-align: center; opacity: .7; padding: 28px 8px; line-height: 1.6; }
+
+#pmem-sheet .pmem-card { border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 10px; padding: 9px 10px; margin: 8px 0; background: rgba(255, 255, 255, .04); }
+#pmem-sheet .pmem-card.pin { border-color: var(--SmartThemeQuoteColor, #4ae); }
+#pmem-sheet .pmem-card.off { opacity: .55; }
+#pmem-sheet .pmem-card.arch { opacity: .5; border-style: dashed; }
+#pmem-sheet .pmem-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+#pmem-sheet .pmem-type { font-size: .85em; font-weight: 600; }
+#pmem-sheet .pmem-text { margin: 6px 0; line-height: 1.4; word-break: break-word; white-space: pre-wrap; }
+#pmem-sheet .pmem-meta { font-size: .78em; opacity: .65; line-height: 1.4; }
+#pmem-sheet .pmem-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+#pmem-sheet .pmem-actions button { min-height: 38px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--SmartThemeBorderColor, #666); background: transparent; color: inherit; font-size: 14px; cursor: pointer; }
+#pmem-sheet .pmem-actions button.on { background: var(--SmartThemeQuoteColor, #4ae); color: #000; }
+#pmem-sheet .pmem-actions button.ok { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+#pmem-sheet .pmem-actions button.danger { border-color: #c55; }
+.pmem-stars { white-space: nowrap; }
+.pmem-star { background: transparent; border: 0; padding: 0 3px; min-width: 30px; min-height: 34px; font-size: 22px; line-height: 1; color: #777; cursor: pointer; }
+.pmem-star.on { color: #ffc107; }
+
+#pmem-sheet .pmem-meter { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .15); overflow: hidden; margin: 4px 0; }
+#pmem-sheet .pmem-meter-fill { height: 100%; background: var(--SmartThemeQuoteColor, #4ae); }
+#pmem-sheet .pmem-meter-fill.over { background: #e53935; }
+#pmem-sheet .pmem-pre { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.45; padding: 8px; border-radius: 8px; background: rgba(0, 0, 0, .35); border: 1px solid var(--SmartThemeBorderColor, #555); max-height: 40vh; overflow: auto; margin: 6px 0; }
+#pmem-sheet .pmem-why { font-size: .85em; opacity: .85; margin: 3px 0; }
+#pmem-sheet .pmem-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: .92em; }
+#pmem-sheet .pmem-table td { padding: 6px 4px; border-bottom: 1px solid var(--SmartThemeBorderColor, #444); vertical-align: top; }
+#pmem-sheet .pmem-table td:first-child { opacity: .8; width: 46%; }
+#pmem-sheet .pmem-sec2 { margin-bottom: 18px; }
+#pmem-sheet .pmem-sec2 h4 { margin: 12px 0 4px; }
+
+/* ---------- éditeur ---------- */
+#pmem-dialog { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 4100; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, env(safe-area-inset-top)) 10px 20px; box-sizing: border-box; }
+#pmem-dialog .pmem-dlg { width: 100%; max-width: 520px; background: var(--SmartThemeBlurTintColor, #1c1c1f); color: var(--SmartThemeBodyColor, #ddd); border: 1px solid var(--SmartThemeBorderColor, #666); border-radius: 12px; padding: 12px 14px; margin-top: 6vh; }
+#pmem-dialog h4 { margin: 0 0 8px; }
+#pmem-dialog label { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; font-size: .92em; }
+#pmem-dialog label.checkbox_label { flex-direction: row; align-items: center; gap: 8px; }
+#pmem-dialog textarea { resize: vertical; width: 100%; }
+#pmem-dialog .pmem-dcount { font-size: .8em; opacity: .65; text-align: right; }
+#pmem-dialog .pmem-dbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+#pmem-dialog .pmem-dbtns .menu_button { min-height: 42px; min-width: 110px; margin: 0; }
+#pmem-dialog .menu_button.ok { background: #2e7d32; color: #fff; }
+
+/* ---------- bouton flottant / déplacement ---------- */
+#pmem-float { position: fixed; z-index: 2900; display: none; width: var(--pmem-size, 46px); height: var(--pmem-size, 46px); touch-action: none; }
+#pmem-float.pmem-show { display: block; }
+#pmem-float #pmem-float-btn { position: relative; width: 100%; height: 100%; border-radius: 50%; border: 1px solid var(--SmartThemeBorderColor, #777); background: var(--SmartThemeBlurTintColor, #222); color: var(--SmartThemeBodyColor, #eee); font-size: calc(var(--pmem-size, 46px) * .5); line-height: 1; padding: 0; cursor: pointer; opacity: .92; box-shadow: 0 2px 8px rgba(0, 0, 0, .4); -webkit-tap-highlight-color: transparent; }
+#pmem-float .pmem-fbadge { position: absolute; right: -4px; top: -4px; min-width: 18px; height: 18px; border-radius: 9px; background: #e53935; color: #fff; font-size: 12px; line-height: 18px; text-align: center; padding: 0 4px; box-sizing: border-box; }
+#pmem-float .pmem-move-label { display: none; }
+#pmem-float.pmem-move { outline: 3px dashed var(--SmartThemeQuoteColor, #4ae); border-radius: 50%; }
+#pmem-float.pmem-move .pmem-move-label { display: block; position: absolute; top: 100%; left: 50%; margin-left: -40px; width: 80px; text-align: center; font-size: 11px; color: var(--SmartThemeQuoteColor, #4ae); }
+#pmem-move-done { position: fixed; z-index: 3100; display: none; left: 50%; bottom: 90px; margin-left: -100px; width: 200px; min-height: 44px; border-radius: 22px; border: 0; background: var(--SmartThemeQuoteColor, #4ae); color: #000; font-weight: 700; font-size: 15px; }
+#pmem-move-done.pmem-show { display: block; }
+
+/* ---------- boutons de message ---------- */
+.mes_buttons .pmem-mes-btn, .extraMesButtons .pmem-mes-btn { cursor: pointer; }
+#pmem_wand_button .pmem-wand-icon { font-style: normal; }
