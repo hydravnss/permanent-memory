@@ -18,7 +18,7 @@ const memTexts = (key) => P((k) => globalThis.permanentMemory.store.getList(k, f
 
 // ---- départ propre
 await P(async () => { const s = globalThis.permanentMemory.store; s.store.scopes = {}; s.store.candidates = []; s.store.rejected = []; await s.saveStoreNow(); });
-await setS({ enabled: true, maxTokens: 400, maxMemories: 6, minScore: 0.5, scanDepth: 4, neverAI: false, autoExtract: false, autoSummary: false, heuristics: true, includeChat: true, useWorld: true, usePersona: false, groupMode: 'speaking', position: 1, depth: 4, role: 0, maxCallsPerDay: 5, maxTokensPerMonth: 30000, autoEvery: 4, floating: false });
+await setS({ enabled: true, maxTokens: 400, maxMemories: 6, minScore: 0.5, scanDepth: 4, neverAI: false, autoExtract: false, autoSummary: false, heuristics: true, includeChat: true, useWorld: true, usePersona: false, groupAllMembers: false, position: 1, depth: 4, role: 0, maxCallsPerDay: 5, maxTokensPerMonth: 30000, autoEvery: 4, floating: false });
 await P(() => globalThis.permanentMemory.store.resetStats());
 await mockClear();
 
@@ -197,7 +197,7 @@ await say(page, 'La lune d’argent brille, cette nuit.');
 b = await block();
 ok(b.includes('lune d’argent'), 'Souvenir « Monde » injecté (pertinent)');
 
-// =============================================================== 8. Groupe : isolation par personnage
+// =============================================================== 8. Groupe : isolation par personnage (réglage optionnel « groupAllMembers » décoché)
 await P(async (gid) => { const g = await import('/scripts/group-chats.js'); await g.openGroupById(gid); }, ids.gid);
 await page.waitForTimeout(2500);
 await slash('/mem add scope=Bob Bob cache une clé dorée sous son enclume');
@@ -219,13 +219,13 @@ await idle(page);
 b = await block();
 ok(b.includes('araignées') && !b.includes('clé dorée'), 'Groupe, Seraphina parle : sa mémoire oui, celle de Bob non');
 ok(b.includes('(Seraphina)') || /\(Seraphina\)/.test(b), 'Lignes étiquetées par personnage en groupe');
-await setS({ groupMode: 'present' });
+await setS({ groupAllMembers: true });
 await mockClear();
 await P(async () => { const c = SillyTavern.getContext(); const i = c.characters.findIndex((x) => x.name === 'Seraphina'); await c.generate('normal', { force_chid: i }); });
 await idle(page);
 b = await block();
 ok(b.includes('araignées') && b.includes('clé dorée'), 'Mode « tous les présents » : les deux mémoires');
-await setS({ groupMode: 'speaking' });
+await setS({ groupAllMembers: false });
 await shot(page, '04-groupe');
 // chat solo avec Bob : pas de fuite
 await selectChar(page, 'Bob');

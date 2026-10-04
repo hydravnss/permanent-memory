@@ -14,6 +14,7 @@ export const state = {
     running: false, // un appel IA est en cours
     lastAIError: '',
     capNotifiedDay: '',
+    drafted: false, // groupe : un membre a été choisi pour répondre (donc la génération en cours est la vraie)
 };
 
 export async function countTokens(text) {
@@ -31,9 +32,9 @@ function chatTexts(type) {
     return msgs.slice(-Math.max(1, S().scanDepth)).map((m) => core.cleanText(m.mes));
 }
 
-export function collectItems() {
+export function collectItems(scopes = st.activeScopes()) {
     const items = [];
-    for (const sc of st.activeScopes()) {
+    for (const sc of scopes) {
         for (const m of st.getList(sc.key, false)) {
             if (!m.enabled || m.archived) continue;
             items.push({ m, scopeKey: sc.key, owner: sc.owner || null, boost: sc.boost || 1 });
@@ -58,12 +59,36 @@ function pendingText(type, params, dryRun) {
     return t && !t.startsWith('/') ? core.cleanText(t) : '';
 }
 
-export async function buildInjection({ type = 'normal', override = null, pending = '' } = {}) {
+/** Nom lisible de l'orateur (avatar) ; '' si inconnu. */
+export function speakerName(av) { return av ? st.charName(av) : ''; }
+
+/** Explique en français POURQUOI rien (ou peu) n'est injecté : portée utilisée, compteurs, filtres, portées ignorées. */
+function explain(report, speakerAv, items, picked) {
+    const out = [];
+    const c = ctx();
+    if (!S().enabled) out.push('L’extension est désactivée (réglage « Activer la mémoire permanente »).');
+    const g = report.group;
+    out.push(g
+        ? `Contexte : groupe « ${g.name} » (${g.members} membre(s)${g.muted ? `, dont ${g.muted} muet(s)` : ''}) — perso qui parle : ${speakerAv ? speakerName(speakerAv) : 'pas encore choisi par SillyTavern (tous les membres sont donc pris en compte)'}.`
+        : (c.characterId !== undefined ? `Contexte : chat de ${c.characters[c.characterId]?.name || 'personnage'}.` : 'Contexte : aucun chat ouvert.'));
+    out.push(`Portées lues : ${report.rows.map((r) => `${r.label} = ${r.usable} utilisable(s)${r.pinned ? ` dont ${r.pinned} épinglé(s)` : ''}`).join(' · ') || '(aucune)'}.`);
+    const dis = report.rows.reduce((a, r) => a + r.disabled, 0);
+    const arc = report.rows.reduce((a, r) => a + r.archived, 0);
+    if (dis || arc) out.push(`Filtrés : ${dis} désactivé(s), ${arc} archivé(s) (ni l’un ni l’autre n’est injecté).`);
+    for (const ig of report.ignored) out.push(`⚠️ ${ig.label} : ${ig.total} souvenir(s) NON injecté(s) — ${ig.why}. (Dans l’éditeur, « Attribuer à » permet de les rattacher au groupe ou au monde.)`);
+    if (!items.length && !report.ignored.length) out.push('Il n’existe aucun souvenir utilisable dans ce contexte.');
+    else if (items.length && !picked.length) out.push('Aucun souvenir n’est épinglé et aucun n’est assez pertinent par rapport aux derniers messages (épingle-les pour les injecter toujours).');
+    return out;
+}
+
+export async function buildInjection({ type = 'normal', override = null, pending = '', speaker } = {}) {
     const s = S();
-    const items = collectItems();
+    const scopes = st.activeScopes(speaker);
+    const speakerAv = speaker === undefined ? st.speakerAvatar() : speaker;
+    const items = collectItems(scopes);
     const texts = override != null ? [String(override)] : [...chatTexts(type), ...(pending ? [pending] : [])].slice(-Math.max(1, s.scanDepth));
     const c = ctx();
-    const ignoreNames = [c.name1, c.characters?.[c.characterId]?.name].filter(Boolean);
+    const ignoreNames = [c.name1, speakerAv ? speakerName(speakerAv) : c.characters?.[c.characterId]?.name].filter(Boolean);
     const header = ctx().substituteParams(s.header || '');
     const headerTokens = core.estTokens(header) + 2;
     const sel = core.selectMemories(items, texts, { ignoreNames, minScore: s.minScore, scanDepth: s.scanDepth, maxMemories: s.maxMemories, maxTokens: s.maxTokens, headerTokens });
@@ -87,27 +112,61 @@ export async function buildInjection({ type = 'normal', override = null, pending
     if (budgetSkipped) warnings.push(`${budgetSkipped} souvenir(s) pertinent(s) ignoré(s) faute de budget (${s.maxTokens} tokens)`);
     if (sel.skipped.some((x) => x.why === 'max')) warnings.push(`${sel.skipped.filter((x) => x.why === 'max').length} souvenir(s) pertinent(s) ignoré(s) : maximum de ${s.maxMemories} souvenirs atteint`);
     if (tokens > s.maxTokens) warnings.push(`Injection (${tokens} tokens) supérieure au budget (${s.maxTokens})`);
+    const report = st.scopeReport(scopes);
+    for (const p of picked) p.scopeLabel = st.scopeLabel(p.scopeKey);
     return {
         text, picked, skipped: sel.skipped, tokens, budget: s.maxTokens, warnings,
         candidates: items.length, query: texts, at: Date.now(), type,
+        speaker: speakerAv || null, speakerName: speakerName(speakerAv), report, why: explain(report, speakerAv, items, picked),
     };
+}
+
+/**
+ * Diagnostic « Tester l'injection maintenant » : calcule (sans rien envoyer) l'injection exacte pour CHAQUE orateur possible.
+ * En groupe : un résultat par membre + un pour « orateur pas encore choisi » ; hors groupe : le perso courant.
+ */
+export async function testInjection({ override = null } = {}) {
+    const g = st.currentGroup();
+    const cases = [];
+    if (g) {
+        cases.push({ av: null, label: 'Avant le choix de l’orateur (moment de GENERATION_STARTED)' });
+        for (const av of g.members || []) cases.push({ av, label: speakerName(av) + ((g.disabled_members || []).includes(av) ? ' (muet)' : '') });
+    } else cases.push({ av: st.speakerAvatar(), label: speakerName(st.speakerAvatar()) || 'Chat courant' });
+    const out = [];
+    for (const cs of cases) {
+        const r = await buildInjection({ type: 'normal', override, speaker: cs.av });
+        out.push({ speaker: cs.av, label: cs.label, tokens: r.tokens, budget: r.budget, count: r.picked.length, candidates: r.candidates, lines: r.picked.map((p) => ({ id: p.m.id, text: p.m.text, pinned: !!p.pinned, scope: p.scopeLabel, tokens: p.tokens })), warnings: r.warnings, why: r.why, text: r.text });
+    }
+    return out;
 }
 
 export function clearInjection() {
     try { ctx().setExtensionPrompt(st.PROMPT_KEY, '', 0, 0, false, 0); } catch { /* ignore */ }
 }
 
+/**
+ * En groupe, ST émet GENERATION_STARTED une première fois « au niveau du groupe » (orateur inconnu, jamais envoyé au modèle),
+ * puis une fois par membre qui répond (après GROUP_MEMBER_DRAFTED). On les distingue pour ne compter que les vraies injections.
+ */
+export function isTopLevelGroup() {
+    const c = ctx();
+    if (!c.groupId) return false;
+    if (c.eventTypes?.GROUP_MEMBER_DRAFTED) return !state.drafted;
+    return c.characterId === undefined;
+}
+export function onMemberDrafted() { state.drafted = true; }
+export function onGroupFinished() { state.drafted = false; }
+
 export async function onGenerationStarted(type, params, dryRun) {
     const s = S();
     try {
         if (!s.enabled || type === 'quiet') { clearInjection(); return; }
-        const r = await buildInjection({ type, pending: pendingText(type, params, dryRun) });
+        const topLevelGroup = isTopLevelGroup(); // ce passage-là n'est jamais envoyé : la vraie génération est relancée par personnage
+        const r = await buildInjection({ type, pending: pendingText(type, params, dryRun), speaker: topLevelGroup ? null : undefined });
         ctx().setExtensionPrompt(st.PROMPT_KEY, r.text, s.position, s.depth, false, s.role);
-        if (!dryRun) state.lastInjection = r;
+        if (!dryRun && !topLevelGroup) state.lastInjection = r;
         state.history.push({ type, dry: !!dryRun, tokens: r.tokens, n: r.picked.length, last: r.query[r.query.length - 1]?.slice(0, 40) });
         if (state.history.length > 20) state.history.shift();
-        const c = ctx();
-        const topLevelGroup = !!c.groupId && c.characterId === undefined; // la vraie génération est relancée par personnage
         if (!dryRun && !topLevelGroup) {
             const stt = st.rollStats();
             stt.injections++; stt.injectedTokensTotal += r.tokens; stt.lastInjectedTokens = r.tokens;

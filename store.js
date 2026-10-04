@@ -13,7 +13,8 @@ export const MODULE = 'permanent_memory';
 export const PROMPT_KEY = 'permanent_memory';
 export const FILE = 'permanent_memory_store.json';
 export const LOG = '[Mémoire Permanente]';
-export const SETTINGS_VERSION = 1;
+export const VERSION = '1.0.1';
+export const SETTINGS_VERSION = 2;
 export const STORE_VERSION = 1;
 
 export const ctx = () => globalThis.SillyTavern.getContext();
@@ -34,7 +35,9 @@ export const DEFAULTS = Object.freeze({
     includeChat: true,
     useWorld: true,
     usePersona: false,
-    groupMode: 'speaking', // 'speaking' = seul le perso qui parle | 'present' = tous les persos présents
+    groupMode: 'speaking', // (hérité, plus utilisé depuis 1.0.1 — voir groupAllMembers)
+    groupAllMembers: true, // groupes : injecter les souvenirs de TOUS les membres (+ groupe + monde) ; le perso qui parle est favorisé
+    groupIncludeMuted: true, // groupes : inclure aussi les membres « muets » (désactivés dans le groupe)
     // création
     heuristics: true,
     heuristicsMinScore: 2,
@@ -99,6 +102,8 @@ export function S() {
     for (const [k, [lo, hi]] of Object.entries(FLOAT)) { const n = Number(s[k]); s[k] = Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : DEFAULTS[k]; }
     if (!['speaking', 'present'].includes(s.groupMode)) s.groupMode = 'speaking';
     if (typeof s.header !== 'string') s.header = DEFAULTS.header;
+    s.groupAllMembers = s.groupAllMembers !== false;
+    s.groupIncludeMuted = s.groupIncludeMuted !== false;
     s.settingsVersion = SETTINGS_VERSION;
     return s;
 }
@@ -127,7 +132,7 @@ export function toast(kind, msg, opts = {}) {
 
 /* ------------------------------------------------------------------ stockage fichier */
 
-export const store = { version: STORE_VERSION, scopes: {}, candidates: [], rejected: [] };
+export const store = { version: STORE_VERSION, appVersion: VERSION, scopes: {}, candidates: [], rejected: [] };
 const status = { loaded: false, canSave: false, error: null, saving: false, dirty: false, lastSave: 0, saves: 0 };
 export const storeStatus = status;
 let saveTimer = null;
@@ -136,7 +141,7 @@ export const onChange = (fn) => { listeners.add(fn); return () => listeners.dele
 export const emitChange = () => { for (const fn of listeners) { try { fn(); } catch (e) { console.warn(LOG, e); } } };
 
 function normalizeStore(raw) {
-    const out = { version: STORE_VERSION, scopes: {}, candidates: [], rejected: [] };
+    const out = { version: STORE_VERSION, appVersion: VERSION, scopes: {}, candidates: [], rejected: [] };
     if (!raw || typeof raw !== 'object') return out;
     const taken = new Set();
     for (const [key, sc] of Object.entries(raw.scopes || {})) {
@@ -164,8 +169,10 @@ export async function loadStore() {
             Object.assign(store, normalizeStore(null));
             status.loaded = true; status.canSave = true; status.error = null;
         } else if (r.ok) {
-            const raw = JSON.parse(await r.text());
+            const txt = await r.text();
+            const raw = JSON.parse(txt);
             Object.assign(store, normalizeStore(raw));
+            await migrateBackup(raw, txt);
             status.loaded = true; status.canSave = true; status.error = null;
         } else {
             throw new Error(`HTTP ${r.status}`);
@@ -178,6 +185,20 @@ export async function loadStore() {
     }
     emitChange();
     return status.loaded;
+}
+
+/** Migration 1.0.1 : copie de sécurité (une seule fois) du fichier tel qu'il était, avant toute réécriture. */
+async function migrateBackup(raw, txt) {
+    try {
+        if (raw?.appVersion === VERSION) return;
+        const n = Object.values(raw?.scopes || {}).reduce((a, sc) => a + (sc?.memories?.length || 0), 0);
+        if (!n) return;
+        const name = `permanent_memory_store_backup_avant_${VERSION}.json`;
+        const ex = await fetch(`/user/files/${name}?t=${Date.now()}`, { cache: 'no-store' });
+        if (ex.ok) return;
+        await uploadUserFile(name, JSON.parse(txt));
+        console.log(LOG, `migration ${VERSION} : copie de sécurité écrite (${n} souvenirs)`);
+    } catch (e) { console.warn(LOG, 'copie de sécurité de migration impossible', e); }
 }
 
 function toB64(str) {
@@ -273,7 +294,7 @@ export function viewerScopes() {
     const g = currentGroup();
     if (g) {
         for (const av of g.members || []) out.push({ key: `char:${av}`, kind: 'char', name: charName(av), label: `🎭 ${charName(av)}` });
-        out.push({ key: `group:${g.id}`, kind: 'group', name: g.name, label: `👥 Groupe « ${g.name} »` });
+        out.push({ key: `group:${g.id}`, kind: 'group', name: g.name, label: `👥 Tout le groupe « ${g.name} »` });
     } else if (c.characterId !== undefined && c.characters[c.characterId]) {
         const ch = c.characters[c.characterId];
         out.push({ key: `char:${ch.avatar}`, kind: 'char', name: ch.name, label: `🎭 ${ch.name}` });
@@ -285,17 +306,25 @@ export function viewerScopes() {
     return out;
 }
 
-/** Portées INJECTÉES pour la génération en cours. */
-export function activeScopes() {
+/**
+ * Portées INJECTÉES pour la génération en cours.
+ * `speakerOverride` (avatar) sert à simuler « si tel perso parle » (bouton Tester l'injection).
+ * En groupe (par défaut, groupAllMembers) : TOUS les membres + le groupe + le monde ; le perso qui parle (s'il est connu)
+ * est seulement favorisé. Avant le choix de l'orateur par ST, il est inconnu : on injecte quand même tous les membres.
+ */
+export function activeScopes(speakerOverride) {
     const s = S();
     const c = ctx();
     const out = [];
     const g = currentGroup();
     if (g) {
-        const spk = speakerAvatar();
-        const members = groupMembers();
-        const chars = s.groupMode === 'speaking' && spk && members.includes(spk) ? [spk] : members;
-        for (const av of chars) out.push({ key: `char:${av}`, kind: 'char', name: charName(av), owner: charName(av), boost: av === spk ? 1.25 : 1 });
+        const spk = speakerOverride === undefined ? speakerAvatar() : speakerOverride;
+        let members = groupMembers();
+        if (s.groupIncludeMuted) members = (g.members || []).slice();
+        let chars = members;
+        if (!s.groupAllMembers && spk && members.includes(spk)) chars = [spk]; // mode isolé (ancien comportement), optionnel
+        else if (spk && !chars.includes(spk)) chars = [...chars, spk];
+        for (const av of chars) out.push({ key: `char:${av}`, kind: 'char', name: charName(av), owner: charName(av), boost: av === spk ? 1.25 : 1, speaker: av === spk });
         out.push({ key: `group:${g.id}`, kind: 'group', name: g.name });
     } else if (c.characterId !== undefined && c.characters[c.characterId]) {
         const ch = c.characters[c.characterId];
@@ -305,6 +334,53 @@ export function activeScopes() {
     if (s.usePersona && currentPersonaAvatar()) out.push({ key: `persona:${currentPersonaAvatar()}`, kind: 'persona', name: c.name1 });
     if (s.useWorld) out.push({ key: 'world', kind: 'world', name: 'Monde' });
     return out;
+}
+
+/** Souvenirs d'une portée par état : total / utilisables / épinglés utilisables / désactivés / archivés. */
+export function scopeCounts(key) {
+    const list = getList(key, false);
+    const r = { total: list.length, usable: 0, pinned: 0, disabled: 0, archived: 0 };
+    for (const m of list) {
+        if (m.archived) r.archived++;
+        else if (!m.enabled) r.disabled++;
+        else { r.usable++; if (m.pinned) r.pinned++; }
+    }
+    return r;
+}
+
+/**
+ * Diagnostic : pour les portées actives, les compteurs ; pour les portées qui contiennent des souvenirs mais NE SONT PAS
+ * injectées dans ce contexte, la raison. C'est ce que l'onglet Injection affiche quand « rien n'est injecté ».
+ */
+export function scopeReport(active) {
+    const s = S();
+    const c = ctx();
+    const g = currentGroup();
+    const activeKeys = new Set(active.map((x) => x.key));
+    const rows = active.map((sc) => ({ key: sc.key, label: scopeLabel(sc.key), speaker: !!sc.speaker, ...scopeCounts(sc.key) }));
+    const ignored = [];
+    const memberSet = new Set(g ? g.members || [] : []);
+    const consider = [...Object.keys(store.scopes), ...(chatData(false) ? ['chat'] : [])];
+    for (const key of consider) {
+        if (activeKeys.has(key)) continue;
+        const cnt = scopeCounts(key);
+        if (!cnt.total) continue;
+        const kind = key.split(':')[0];
+        let why = 'portée non utilisée dans ce contexte';
+        if (kind === 'char') {
+            const av = key.slice(5);
+            if (g && !memberSet.has(av)) why = `ce personnage n’est pas membre du groupe « ${g.name} »`;
+            else if (g && (g.disabled_members || []).includes(av) && !s.groupIncludeMuted) why = 'membre muet exclu (réglage « inclure les membres muets » décoché)';
+            else if (g) why = 'réglage « tous les membres du groupe » décoché : seul le perso qui parle est injecté';
+            else if (!g && c.characterId !== undefined) why = 'ce personnage n’est pas le personnage du chat actuel';
+            else why = 'aucun chat de personnage ou de groupe ouvert';
+        } else if (kind === 'group') why = g ? 'souvenirs d’un autre groupe' : 'aucun groupe ouvert';
+        else if (kind === 'persona') why = 'réglage « Inclure les souvenirs du persona » désactivé ou autre persona';
+        else if (kind === 'world') why = 'réglage « Monde » désactivé';
+        else if (kind === 'chat') why = 'réglage « Inclure les souvenirs propres au chat » désactivé';
+        ignored.push({ key, label: scopeLabel(key), why, ...cnt });
+    }
+    return { rows, ignored, enabled: s.enabled, group: g ? { id: g.id, name: g.name, members: (g.members || []).length, muted: (g.disabled_members || []).length } : null };
 }
 
 /** Liste (modifiable en place) des souvenirs d'une portée. */
@@ -325,7 +401,7 @@ export function scopeLabel(key) {
     if (key === 'world') return '🌍 Monde';
     const sc = store.scopes[key];
     const kind = key.split(':')[0];
-    const nm = sc?.name || key;
+    const nm = kind === 'char' ? (ctx().characters?.find((c) => c.avatar === key.slice(5))?.name || sc?.name || key) : (sc?.name || key);
     return kind === 'char' ? `🎭 ${nm}` : kind === 'group' ? `👥 ${nm}` : kind === 'persona' ? `🙋 ${nm}` : nm;
 }
 

@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "hydravnss",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homePage": "https://github.com/hydravnss/permanent-memory",
     "minimum_client_version": "1.12.0",
     "auto_update": true

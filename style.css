@@ -103,3 +103,15 @@ body.pmem-lock { overscroll-behavior: none; }
 /* ---------- boutons de message ---------- */
 .mes_buttons .pmem-mes-btn, .extraMesButtons .pmem-mes-btn { cursor: pointer; }
 #pmem_wand_button .pmem-wand-icon { font-style: normal; }
+
+/* 1.0.1 : attribution, diagnostic d'injection */
+.pmem-scope { font-weight: 600; }
+.pmem-scope.off { opacity: .75; text-decoration: underline dotted; }
+.pmem-warn-inline { color: #e8a33d; font-size: .9em; }
+.pmem-assign { display: flex; align-items: center; gap: 6px; width: 100%; margin-top: 6px; font-size: .9em; }
+.pmem-assign select { flex: 1; min-width: 0; }
+.pmem-scopes td { vertical-align: top; padding: 3px 6px; }
+.pmem-ign td { color: #e8a33d; }
+.pmem-diag, .pmem-test { margin: 8px 0; }
+.pmem-why { font-size: .9em; padding: 2px 0; line-height: 1.35; }
+.pmem-testbox { margin-bottom: 8px; }

@@ -34,7 +34,8 @@ const FIELDS = [
     { key: 'includeChat', type: 'check', label: 'Inclure les souvenirs propres au chat' },
     { key: 'useWorld', type: 'check', label: 'Inclure les souvenirs « Monde » (partagés)' },
     { key: 'usePersona', type: 'check', label: 'Inclure les souvenirs du persona' },
-    { key: 'groupMode', type: 'select', label: 'Groupes : souvenirs de…', options: [['speaking', 'Seulement le perso qui parle (+ groupe)'], ['present', 'Tous les persos présents']] },
+    { key: 'groupAllMembers', type: 'check', label: 'Groupes : injecter les souvenirs de tous les membres du groupe (+ groupe + monde). Décoché : seulement le perso qui parle.' },
+    { key: 'groupIncludeMuted', type: 'check', label: 'Groupes : inclure aussi les membres « muets »' },
     { sec: 'Création des souvenirs' },
     { key: 'heuristics', type: 'check', label: 'Détecter des candidats en local (gratuit)' },
     { key: 'heuristicsMinScore', type: 'num', label: 'Exigence de la détection locale (1 = large, 4 = strict)', min: 1, max: 6 },
@@ -255,19 +256,37 @@ function renderSheet() {
 
 /* ---- onglet Souvenirs */
 
-function memCard(key, m, multi) {
-    const badge = m.pinned ? '📌' : '📍';
+/** Portées proposées dans « Attribuer à » : tout le groupe d'abord, puis les persos, le chat, le persona, le monde. */
+function attribScopes() {
+    const cur = st.viewerScopes();
+    const rank = { group: 0, char: 1, chat: 2, persona: 3, world: 4 };
+    return cur.slice().sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9));
+}
+function activeKeySet() {
+    try { return new Set(st.activeScopes(st.currentGroup() ? null : undefined).map((x) => x.key)); } catch { return new Set(); }
+}
+function attribOptions(selected) {
+    const sc = attribScopes();
+    const keys = new Set(sc.map((x) => x.key));
+    let h = sc.map((x) => `<option value="${esc(x.key)}"${x.key === selected ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
+    if (selected && !keys.has(selected)) h += `<option value="${esc(selected)}" selected>${esc(st.scopeLabel(selected))} (hors contexte)</option>`;
+    return h;
+}
+
+function memCard(key, m, multi, activeKeys = new Set()) {
+    const inactive = !activeKeys.has(key);
     return `<div class="pmem-card${m.enabled ? '' : ' off'}${m.archived ? ' arch' : ''}${m.pinned ? ' pin' : ''}" data-key="${esc(key)}" data-id="${m.id}">
 <div class="pmem-card-top"><span class="pmem-type">${core.TYPE_ICONS[m.type] || ''} ${esc(core.TYPES[m.type] || m.type)}</span>
 <span class="pmem-stars">${stars(m.importance, `data-key="${esc(key)}" data-id="${m.id}"`)}</span></div>
 <div class="pmem-text" data-act="edit">${esc(m.text)}</div>
-<div class="pmem-meta">${multi ? `<span>${esc(st.scopeLabel(key))}</span> · ` : ''}<span>${m.id}</span> · utilisé ${m.uses || 0}× · ${fmtDate(m.created)}${m.keywords?.length ? ` · 🏷 ${esc(m.keywords.join(', '))}` : ''}${m.archived ? ' · 🗄 archivé' : ''}</div>
+<div class="pmem-meta"><span class="pmem-scope${inactive ? ' off' : ''}" title="Attribué à">${esc(st.scopeLabel(key))}</span>${inactive ? ' <span class="pmem-warn-inline">⚠️ non injecté ici</span>' : ''} · <span>${m.id}</span> · utilisé ${m.uses || 0}× · ${fmtDate(m.created)}${m.keywords?.length ? ` · 🏷 ${esc(m.keywords.join(', '))}` : ''}${m.archived ? ' · 🗄 archivé' : ''}</div>
 <div class="pmem-actions">
 <button type="button" data-act="pin" class="${m.pinned ? 'on' : ''}" title="Épingler (toujours injecté)">${m.pinned ? '📌 Épinglé' : '📍 Épingler'}</button>
 <button type="button" data-act="toggle" class="${m.enabled ? '' : 'on'}">${m.enabled ? '⏸ Désactiver' : '▶️ Activer'}</button>
 <button type="button" data-act="archive">${m.archived ? '↩️ Restaurer' : '🗄 Archiver'}</button>
 <button type="button" data-act="edit">✎ Modifier</button>
 <button type="button" data-act="del" class="danger">🗑</button>
+<label class="pmem-assign">Attribuer à <select class="text_pole pmem-reassign" data-key="${esc(key)}" data-id="${m.id}">${attribOptions(key)}</select></label>
 </div></div>`;
 }
 
@@ -282,7 +301,7 @@ function renderMem() {
 <select id="pmem-fstatus" class="text_pole">${[['actifs', 'Actifs'], ['epingles', 'Épinglés'], ['desactives', 'Désactivés'], ['archives', 'Archivés'], ['tous', 'Tous']].map(([v, t]) => `<option value="${v}"${ui.status === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
 </div>
 <div class="pmem-bar"><button type="button" class="menu_button" data-act="new">➕ Ajouter</button><span class="pmem-count">${total} souvenir(s)</span></div>
-${total ? entries.map(({ key, m }) => memCard(key, m, multi)).join('') : '<div class="pmem-empty">Aucun souvenir ici.<br>Ajoute-en avec ➕, le bouton 🧠 sur un message, ou <code>/mem add …</code>.</div>'}`;
+${total ? (() => { const ak = activeKeySet(); return entries.map(({ key, m }) => memCard(key, m, multi, ak)).join(''); })() : '<div class="pmem-empty">Aucun souvenir ici.<br>Ajoute-en avec ➕, le bouton 🧠 sur un message, ou <code>/mem add …</code>.</div>'}`;
 }
 
 /* ---- onglet Candidats */
@@ -319,26 +338,51 @@ function aiButton(kind, label) {
 
 function renderInj() {
     const li = eng.state.lastInjection;
-    return `<div class="pmem-note">Aperçu de ce qui serait injecté <b>maintenant</b> (calcul local, aucun appel API). Tout est ajouté à la fin du prompt, à la profondeur choisie.</div>
+    let last = 'Aucune génération depuis le chargement.';
+    if (li) {
+        const lines = li.picked.map((p) => `<div class="pmem-why">${p.pinned ? '📌' : '🎯'} <b>${esc(p.m.text.slice(0, 70))}</b> — ${esc(p.scopeLabel || '')} · ${p.tokens} tok · utilisé ${p.m.uses || 0}×</div>`).join('');
+        last = `Dernière injection <b>réellement envoyée</b> : ${li.tokens} tokens, ${li.picked.length} souvenir(s) sur ${li.candidates} candidat(s) (${new Date(li.at).toLocaleTimeString('fr-FR')}) — ${li.speakerName ? `perso qui parlait : <b>${esc(li.speakerName)}</b>` : 'chat solo / orateur inconnu'}.${lines ? `<details open><summary>Détail</summary>${lines}</details>` : ''}${li.picked.length ? '' : `<details><summary>Pourquoi 0 ?</summary>${li.why.map((w) => `<div class="pmem-why">${esc(w)}</div>`).join('')}</details>`}`;
+    }
+    return `<div class="pmem-note">Aperçu de ce qui serait injecté <b>maintenant</b> (calcul local, aucun appel API ; même fonction que l’injection réelle). Tout est ajouté à la fin du prompt, à la profondeur choisie.</div>
 <div class="pmem-bar"><input id="pmem-sim" class="text_pole" type="text" placeholder="Simuler : écris un message…" value="${esc(ui.sim)}"><button type="button" class="menu_button" data-act="sim">▶︎ Simuler</button><button type="button" class="menu_button" data-act="refresh">↻</button></div>
 <div id="pmem-injbox" class="pmem-injbox">Calcul…</div>
-<div class="pmem-note">${li ? `Dernière injection <b>réellement envoyée</b> : ${li.tokens} tokens, ${li.picked.length} souvenir(s) (${new Date(li.at).toLocaleTimeString('fr-FR')}).` : 'Aucune génération depuis le chargement.'}</div>`;
+<div class="pmem-bar"><button type="button" class="menu_button" data-act="testinj" id="pmem-testinj">🧪 Tester l’injection maintenant</button></div>
+<div id="pmem-testbox" class="pmem-testbox">${ui.testHtml || ''}</div>
+<div class="pmem-note" id="pmem-last">${last}</div>`;
+}
+
+function whyHtml(why) {
+    return `<details class="pmem-diag" open><summary>Pourquoi / portées utilisées</summary>${why.map((w) => `<div class="pmem-why">${esc(w)}</div>`).join('')}</details>`;
 }
 
 async function loadInjPreview() {
     const box = $('#pmem-injbox');
     if (!box) return;
     try {
-        const r = await eng.buildInjection({ type: 'normal', override: ui.sim ? ui.sim : null });
+        const r = await eng.buildInjection({ type: 'normal', override: ui.sim ? ui.sim : null, speaker: st.currentGroup() ? null : undefined });
         eng.state.preview = r;
         const pct = Math.min(100, Math.round((r.tokens / Math.max(1, r.budget)) * 100));
         const over = r.tokens > r.budget;
+        const rows = r.report.rows.map((x) => `<tr><td>${esc(x.label)}</td><td>${x.usable} utilisable(s)${x.pinned ? ` · ${x.pinned} 📌` : ''}${x.disabled ? ` · ${x.disabled} désactivé(s)` : ''}${x.archived ? ` · ${x.archived} archivé(s)` : ''}</td></tr>`).join('');
+        const ign = r.report.ignored.map((x) => `<tr class="pmem-ign"><td>⚠️ ${esc(x.label)}</td><td>${x.total} souvenir(s) non injecté(s) — ${esc(x.why)}</td></tr>`).join('');
         box.innerHTML = `<div class="pmem-meter"><div class="pmem-meter-fill${over ? ' over' : ''}" style="width:${pct}%"></div></div>
-<div class="pmem-count"><b id="pmem-inj-tokens">${r.tokens}</b> / ${r.budget} tokens · ${r.picked.length} souvenir(s) sur ${r.candidates} · ${st.viewerScopes().length ? '' : ''}</div>
+<div class="pmem-count"><b id="pmem-inj-tokens">${r.tokens}</b> / ${r.budget} tokens · ${r.picked.length} souvenir(s) sur ${r.candidates}</div>
 ${r.warnings.map((w) => `<div class="pmem-warn">⚠️ ${esc(w)}</div>`).join('')}
 <pre id="pmem-preview" class="pmem-pre">${r.text ? esc(r.text) : '(rien à injecter : aucun souvenir pertinent ni épinglé)'}</pre>
-${r.picked.length ? `<details><summary>Pourquoi ces souvenirs ?</summary>${r.picked.map((p) => `<div class="pmem-why">${p.pinned ? '📌' : '🎯'} <b>${esc(p.m.text.slice(0, 60))}</b> — ${p.pinned ? 'épinglé' : `score ${p.score.toFixed(2)} (mots : ${esc([...(p.hits || []), ...(p.kwHits || [])].join(', ') || '—')})`}</div>`).join('')}</details>` : ''}`;
+${r.picked.length ? `<details><summary>Pourquoi ces souvenirs ?</summary>${r.picked.map((p) => `<div class="pmem-why">${p.pinned ? '📌' : '🎯'} <b>${esc(p.m.text.slice(0, 60))}</b> — ${esc(p.scopeLabel || '')} — ${p.pinned ? 'épinglé' : `score ${p.score.toFixed(2)} (mots : ${esc([...(p.hits || []), ...(p.kwHits || [])].join(', ') || '—')})`}</div>`).join('')}</details>` : ''}
+${r.picked.length ? '' : whyHtml(r.why)}
+<table class="pmem-table pmem-scopes">${rows}${ign}</table>`;
     } catch (e) { box.textContent = 'Erreur : ' + (e?.message || e); }
+}
+
+async function runTestInjection() {
+    const box = $('#pmem-testbox');
+    if (box) box.textContent = 'Calcul…';
+    const res = await eng.testInjection({ override: ui.sim ? ui.sim : null });
+    ui.testHtml = res.map((x) => `<details class="pmem-test" open><summary><b>${esc(x.label)}</b> → ${x.count} souvenir(s), ${x.tokens}/${x.budget} tokens</summary>${x.lines.map((l) => `<div class="pmem-why">${l.pinned ? '📌' : '🎯'} ${esc(l.text.slice(0, 80))} <i>(${esc(l.scope)}, ${l.tokens} tok)</i></div>`).join('') || '<div class="pmem-why">(rien)</div>'}${x.count ? '' : x.why.map((w) => `<div class="pmem-why">${esc(w)}</div>`).join('')}</details>`).join('');
+    const b2 = $('#pmem-testbox');
+    if (b2) b2.innerHTML = ui.testHtml;
+    return res;
 }
 
 /* ---- onglet Coût */
@@ -394,6 +438,11 @@ function onSheetInput(e) {
     else if (t.id === 'pmem-ftype') { ui.type = t.value; renderSheet(); }
     else if (t.id === 'pmem-fstatus') { ui.status = t.value; renderSheet(); }
     else if (t.id === 'pmem-sim') ui.sim = t.value;
+    else if (t.classList?.contains('pmem-reassign') && e.type === 'change') {
+        const to = t.value; const from = t.dataset.key;
+        if (to && to !== from && st.moveMemory(from, t.dataset.id, to)) st.toast('success', `Attribué à : ${st.scopeLabel(to)}`);
+        renderSheet();
+    }
     else if (t.id === 'pmem-file' && e.type === 'change') doImport(t.files?.[0]);
 }
 
@@ -427,7 +476,7 @@ async function onSheetClick(e) {
             else { btn.dataset.armed = '1'; btn.textContent = 'Confirmer ?'; setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = '🗑'; } }, 3000); }
             break;
         }
-        case 'new': openEditor({ mode: 'new', key: st.viewerScopes().find((x) => x.key === ui.scope)?.key || st.viewerScopes()[0]?.key || 'world' }); break;
+        case 'new': openEditor({ mode: 'new', key: st.viewerScopes().find((x) => x.key === ui.scope)?.key || attribScopes()[0]?.key || 'world' }); break;
         case 'c-ok': { const c = cand(); if (c) { st.acceptCandidate(id); st.toast('success', 'Souvenir ajouté'); } break; }
         case 'c-no': st.rejectCandidate(id); break;
         case 'c-edit': { const c = cand(); if (c) openEditor({ mode: 'cand', key: c.scope, entry: c }); break; }
@@ -456,6 +505,7 @@ async function onSheetClick(e) {
         }
         case 'sim': ui.sim = $('#pmem-sim')?.value || ''; loadInjPreview(); break;
         case 'refresh': loadInjPreview(); break;
+        case 'testinj': await runTestInjection(); return;
         case 'eco': st.applyPreset('economie'); S().neverAI = false; st.saveSettings(); syncControls(); st.emitChange(); st.toast('success', 'Mode économie activé'); break;
         case 'never': S().neverAI = !S().neverAI; st.saveSettings(); syncControls(); st.emitChange(); break;
         case 'resetstats': st.resetStats(); break;
@@ -506,10 +556,7 @@ async function doImport(file) {
 export function openEditor({ mode = 'new', key, entry = null, text = '', type = 'fait', importance = 3, idx = null, keywords = '', pinned = false, onSave = null }) {
     $('#pmem-dialog')?.remove();
     const m = entry || { text, type, importance, keywords: typeof keywords === 'string' ? keywords.split(',') : keywords, pinned };
-    const cur = st.viewerScopes();
-    const keys = new Set(cur.map((x) => x.key));
-    let opts = cur.map((x) => `<option value="${esc(x.key)}"${x.key === key ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
-    if (key && !keys.has(key)) opts += `<option value="${esc(key)}" selected>${esc(st.scopeLabel(key))}</option>`;
+    const opts = attribOptions(key);
     const d = document.createElement('div');
     d.id = 'pmem-dialog';
     d.innerHTML = `<div class="pmem-dlg" role="dialog">
@@ -519,7 +566,7 @@ export function openEditor({ mode = 'new', key, entry = null, text = '', type = 
 <label>Type<select id="pmem-d-type" class="text_pole">${typeOptions(m.type)}</select></label>
 <label>Importance<span class="pmem-stars" id="pmem-d-stars" data-n="${m.importance}">${stars(m.importance)}</span></label>
 <label>Mots-clés (séparés par des virgules)<input id="pmem-d-kw" class="text_pole" type="text" value="${esc((m.keywords || []).join(', '))}"></label>
-<label>Portée<select id="pmem-d-scope" class="text_pole">${opts}</select></label>
+<label>Attribuer à (tout le groupe / personnage / monde)<select id="pmem-d-scope" class="text_pole">${opts}</select></label>
 <label class="checkbox_label"><input type="checkbox" id="pmem-d-pin"${m.pinned ? ' checked' : ''}><span>📌 Épinglé (toujours injecté)</span></label>
 <div class="pmem-dbtns"><button type="button" class="menu_button" id="pmem-d-cancel">Annuler</button><button type="button" class="menu_button ok" id="pmem-d-save">Enregistrer</button></div>
 </div>`;

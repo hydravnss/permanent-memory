@@ -142,6 +142,7 @@ async function start() {
     const ev = c.eventSource;
     const T = c.eventTypes;
     const onChat = () => {
+        eng.onGroupFinished();
         try { eng.initChatCursors(); } catch (e) { console.warn(LOG, e); }
         eng.clearInjection();
         ui.refreshAll();
@@ -158,7 +159,8 @@ async function start() {
     };
     ev.on(T.MESSAGE_RECEIVED, onMsg);
     ev.on(T.MESSAGE_SENT, () => { try { eng.scanNew(); } catch (e) { console.warn(LOG, e); } ui.renderSoon(); });
-    for (const name of ['GROUP_WRAPPER_FINISHED']) if (T[name]) ev.on(T[name], () => eng.scheduleAuto());
+    if (T.GROUP_MEMBER_DRAFTED) ev.on(T.GROUP_MEMBER_DRAFTED, () => eng.onMemberDrafted());
+    if (T.GROUP_WRAPPER_FINISHED) ev.on(T.GROUP_WRAPPER_FINISHED, () => { eng.onGroupFinished(); eng.scheduleAuto(); });
     for (const name of ['USER_MESSAGE_RENDERED', 'CHARACTER_MESSAGE_RENDERED', 'MORE_MESSAGES_LOADED', 'MESSAGE_UPDATED', 'MESSAGE_SWIPED', 'MESSAGE_DELETED']) {
         if (T[name]) ev.on(T[name], () => { ui.decorateMessages(); });
     }

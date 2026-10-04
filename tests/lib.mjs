@@ -115,3 +115,20 @@ export async function ensureBobAndGroup(page) {
         return { sera: sera.avatar, bob: bob.avatar, gid: g.id };
     });
 }
+
+/** Crée un personnage simple s'il n'existe pas. */
+export async function ensureChar(page, name) {
+    return page.evaluate(async (n) => {
+        const c = SillyTavern.getContext();
+        if (!c.characters.find((x) => x.name === n)) {
+            const fd = new FormData();
+            fd.append('ch_name', n); fd.append('file_name', n); fd.append('description', `${n} est un personnage de test.`); fd.append('first_mes', `Bonjour, je suis ${n}.`);
+            fd.append('avatar_url', 'none'); fd.append('tags', ''); fd.append('personality', ''); fd.append('scenario', ''); fd.append('mes_example', ''); fd.append('creator_notes', ''); fd.append('system_prompt', ''); fd.append('post_history_instructions', ''); fd.append('creator', ''); fd.append('character_version', ''); fd.append('alternate_greetings', ''); fd.append('talkativeness', '0.5'); fd.append('fav', 'false'); fd.append('world', '');
+            const h = c.getRequestHeaders(); delete h['Content-Type'];
+            const r = await fetch('/api/characters/create', { method: 'POST', headers: h, body: fd });
+            if (!r.ok) throw new Error('create ' + n + ' ' + r.status);
+            await c.getCharacters();
+        }
+        return SillyTavern.getContext().characters.find((x) => x.name === n).avatar;
+    }, name);
+}

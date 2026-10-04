@@ -9,6 +9,10 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.0.1 — correctif groupes
+
+Dans un chat de **groupe**, des souvenirs épinglés pouvaient ne **jamais** être injectés (« 0 / 400 tokens · 0 souvenir(s) sur 0 »). Cause : en 1.0.0 le réglage par défaut isolait les souvenirs **du seul perso qui parle** ; si ce perso (ou, hors génération, la fiche de membre ouverte) n'avait pas de souvenir à lui, les souvenirs attribués aux autres membres restaient hors du prompt. Corrigé : tous les membres sont injectés par défaut. **Aucun souvenir n'est perdu** : le fichier `permanent_memory_store.json` est relu tel quel, et une copie de sécurité `permanent_memory_store_backup_avant_1.0.1.json` est écrite une fois au premier chargement.
+
 ## Installation
 
 SillyTavern → **Extensions** (icône 🧩) → **Install extension** → colle l'URL :
@@ -79,8 +83,16 @@ Dans les actions du message (icône « … »), 🧠 **Mémoriser ce message** :
 ```
 `scope` = `perso` (défaut), `chat`, `monde`, `persona`, `groupe`, ou le nom d'un personnage du groupe. `type` = `fait`, `relation`, `evenement`, `preference`, `lieu`, `objectif`.
 
+### Diagnostic de l'injection (onglet *Injection*)
+- Affiche la **portée utilisée** (groupe, perso qui parle ou « pas encore choisi »), le **nombre de souvenirs par portée** (utilisables / épinglés / désactivés / archivés) et, si rien n'est injecté, **pourquoi** : réglage désactivé, souvenirs filtrés, ou souvenirs rattachés à une portée non injectée (ex. un personnage hors du groupe).
+- L'aperçu et l'injection réelle utilisent **la même fonction** (`buildInjection`).
+- **🧪 Tester l'injection maintenant** : liste exactement les souvenirs qui seraient injectés pour **chaque orateur possible** (avant le choix de l'orateur, puis chaque membre).
+- **Dernière injection réellement envoyée** : orateur, tokens, souvenirs (avec leur portée) et compteur « utilisé ». Le passage « niveau groupe » de ST (qui n'est jamais envoyé au modèle) n'est plus compté.
+
 ### Chats de groupe
-- Une mémoire **séparée par personnage**. Par défaut, seule la mémoire du **personnage qui parle** (+ mémoire du groupe + « Monde ») est injectée : Bob ne « sait » pas ce que Seraphina a en mémoire. Option : *tous les personnages présents* (les lignes sont alors étiquetées `(Nom)`).
+- Une mémoire **séparée par personnage**, mais **depuis la 1.0.1, par défaut, tous les membres du groupe sont injectés** (réglage *« Injecter les souvenirs de tous les membres du groupe »*, ON) : souvenirs **épinglés** de tous les membres + mémoire du **groupe** + **« Monde »** ; les souvenirs non épinglés sont classés par pertinence sur l'ensemble des membres et celui du **perso qui parle est favorisé** (×1,25) quand ST l'a déjà choisi. Les lignes sont étiquetées `(Nom)`. Les membres « muets » sont inclus par défaut (réglage dédié).
+- Décocher le réglage rétablit l'ancien mode « isolé » (seul le perso qui parle) — dans ce mode, un souvenir attribué à un autre membre n'est **pas** injecté, et l'onglet *Injection* te le dit.
+- **Attribution** : chaque carte affiche à qui appartient le souvenir (🎭 perso, 👥 groupe, 🌍 monde…) et un sélecteur **« Attribuer à »** permet de le changer en un tap (« Tout le groupe », un personnage, le chat, le monde). En groupe, un nouveau souvenir est attribué à *tout le groupe* par défaut. Un ⚠️ signale un souvenir rattaché à une portée qui n'est pas injectée dans le contexte courant.
 - Les messages d'un personnage proposent des candidats pour **ce** personnage ; ceux de l'utilisateur vont à la mémoire du **groupe**.
 
 ### Entretien
@@ -112,7 +124,7 @@ Tests automatisés (`tests/`) contre un vrai SillyTavern 1.19.0 + faux backend O
 - ✅ mode « Ne jamais appeler l'IA » : 0 requête mémoire (compteur côté backend) ;
 - ✅ extraction automatique : exactement 1 appel par intervalle, plafond quotidien respecté ;
 - ✅ boîte de candidats (accepter / rejeter), résumé, doublons/fusion, archivage, import/export aller-retour, sauvegarde ;
-- ✅ chat de groupe : isolation par personnage ;
+- ✅ chat de groupe : 3 souvenirs épinglés attribués à 3 membres, un 4ᵉ membre (sans souvenir) qui parle → les 3 sont injectés ; budget respecté ; compteur « utilisé » incrémenté une seule fois par vraie génération (`tests/e2e-group.mjs`) ; isolation par personnage seulement si le réglage est décoché ;
 - ✅ interface utilisable à la taille d'un iPhone 14 Pro, aucun `transform` ajouté sur un ancêtre, aucune erreur console.
 
 Non vérifié : **vrai iPhone** (seulement l'émulation WebKit), **vraie API DeepSeek** (l'économie réelle dépendra de ton usage), autres thèmes que celui par défaut.
