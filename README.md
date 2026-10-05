@@ -9,6 +9,14 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.2.0 — moins de souvenirs, mais utiles ; boutons IA plus clairs
+
+- **L'IA ne retient que l'important** : relations et leur évolution (amour, jalousie, rivalité, trahison, alliance), conflits, décisions, promesses, menaces, secrets révélés, tournants de l'intrigue, changements de statut, faits durables, lieux/objets clés. Interdit : gestes, regards, mouvements, ambiance, décor, répliques ponctuelles, émotions passagères. Elle répond « RIEN » s'il n'y a rien d'important (même chose pour 🎬 Résumer).
+- **Filtre « faits mineurs »** : réglage *Importance minimale* (3 par défaut) + détection des faits qui décrivent surtout un geste / un regard / un déplacement sans enjeu. Le résultat affiche « N faits mineurs ignorés ».
+- **Analyse locale automatique à chaque message : désactivée par défaut** (migration : si l'ancien réglage par défaut était en place, il passe à off). « Analyser l'historique (gratuit) » ne propose plus d'extraits bruts (option pour les réactiver).
+- **Mots-clés** : plus de mots vides (« laquelle », « longuement »…) ni d'adverbes / verbes conjugués : noms propres et noms communs seulement.
+- **Boutons « Extraire avec l'IA » et « 🎬 Résumer »** : 1er tap → « 👉 Touche encore pour lancer (≈ N tokens) » + aide (revient seul après 8 s) ; 2e tap → bouton bloqué « ⏳ Extraction en cours… » avec roue animée et compteur de secondes (« ⏳ Nouvel essai… » pendant la relance) ; à la fin, un message sous le bouton (« ✅ N souvenirs proposés ci-dessous », « Rien d'important trouvé » ou l'erreur) et les nouveaux candidats sont mis en évidence. Impossible de lancer deux fois.
+
 ## Mise à jour 1.1.0 — de vrais petits résumés (plus de copier-coller du chat)
 
 Retour d'utilisation (RP en groupe) : les candidats recopiaient les messages au lieu de résumer, et c'était incomplet. Changements :
@@ -152,6 +160,7 @@ Tests automatisés (`tests/`) contre un vrai SillyTavern 1.19.0 + faux backend O
 - ✅ extraction automatique : exactement 1 appel par intervalle, plafond quotidien respecté ;
 - ✅ boîte de candidats (accepter / rejeter), résumé, doublons/fusion, archivage, import/export aller-retour, sauvegarde ;
 - ✅ chat de groupe : 3 souvenirs épinglés attribués à 3 membres, un 4ᵉ membre (sans souvenir) qui parle → les 3 sont injectés ; budget respecté ; compteur « utilisé » incrémenté une seule fois par vraie génération (`tests/e2e-group.mjs`) ; isolation par personnage seulement si le réglage est décoché ;
+- ✅ 1.2.0 (`tests/e2e-ux.mjs`, faux backend avec délai de réponse simulé) : bouton armé + aide + retour auto après 8 s, chargement (bouton désactivé, roue animée, compteur de secondes, toast), « Nouvel essai… », un seul appel malgré les taps répétés, « ✅ N souvenirs proposés ci-dessous » + « N faits mineurs ignorés » + mise en évidence, « Rien d’important trouvé », erreur claire, idem pour 🎬 Résumer, 0 erreur console. Non testé : vrai DeepSeek, vrai iPhone ;
 - ✅ 1.1.0 (`tests/e2e-resumes.mjs`, faux backend dont la réponse contient des souvenirs reformulés) : prompt reformulé + souvenirs connus envoyés, doublon de sens ignoré, copies/guillemets marqués « à reformuler » (sans ✓ Garder), acceptation / « Tout accepter (sauf bruts) » / ✎ Modifier, relance sans doublons, bouton « Résumer les derniers messages » (confirmation de coût, 1 appel, 1 candidat événement, plafond respecté, réponse vide), analyse locale (faits structurés vs extraits bruts), migration des réglages, 0 erreur console ;
 - ✅ interface utilisable à la taille d'un iPhone 14 Pro, aucun `transform` ajouté sur un ancêtre, aucune erreur console.
 

@@ -117,3 +117,25 @@ body.pmem-lock { overscroll-behavior: none; }
 .pmem-testbox { margin-bottom: 8px; }
 #pmem-sheet .pmem-card.raw { border-style: dashed; opacity: .95; }
 #pmem-sheet .pmem-rawtag { display: inline-block; margin: 2px 0 4px; padding: 1px 8px; border-radius: 9px; background: rgba(230, 150, 30, .22); border: 1px solid rgba(230, 150, 30, .6); font-size: .8em; }
+
+/* 1.2.0 : boutons IA — état armé, chargement (spinner + secondes), statut final, nouveaux candidats */
+#pmem-sheet .menu_button.pmem-armed { background: #b8860b; color: #fff; font-weight: 600; animation: pmem-pulse 1.2s ease-in-out infinite; }
+#pmem-sheet .menu_button.pmem-busy { opacity: 1; cursor: progress; display: inline-flex; align-items: center; gap: 8px; background: #2d4f7c; color: #fff; }
+#pmem-sheet .pmem-spin { width: 1em; height: 1em; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%; display: inline-block; flex: none; animation: pmem-rot .8s linear infinite; }
+#pmem-sheet .pmem-secs { font-variant-numeric: tabular-nums; opacity: .85; }
+#pmem-sheet .pmem-help { font-size: .85em; margin: -2px 0 6px; padding: 6px 8px; border-radius: 6px; background: rgba(184, 134, 11, .15); border-left: 3px solid #b8860b; line-height: 1.35; }
+#pmem-sheet .pmem-ai-status { font-size: .9em; margin: -2px 0 8px; padding: 7px 9px; border-radius: 6px; line-height: 1.4; border-left: 3px solid; }
+#pmem-sheet .pmem-st-run { background: rgba(45, 79, 124, .18); border-color: #4a7cc0; }
+#pmem-sheet .pmem-st-ok { background: rgba(40, 140, 70, .16); border-color: #2e9b52; }
+#pmem-sheet .pmem-st-none { background: rgba(128, 128, 128, .16); border-color: #888; }
+#pmem-sheet .pmem-st-err { background: rgba(170, 40, 40, .16); border-color: #b33; }
+#pmem-sheet .pmem-card.pmem-new { outline: 2px solid #2e9b52; animation: pmem-flash 1.6s ease-out 2; }
+#pmem-sheet .pmem-newtag { font-size: .8em; font-weight: 600; color: #2e9b52; margin-bottom: 2px; }
+@keyframes pmem-rot { to { transform: rotate(360deg); } }
+@keyframes pmem-pulse { 50% { filter: brightness(1.25); } }
+@keyframes pmem-flash { 0% { background-color: rgba(46, 155, 82, .35); } 100% { background-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { #pmem-sheet .pmem-spin { animation-duration: 2.4s; } #pmem-sheet .menu_button.pmem-armed, #pmem-sheet .pmem-card.pmem-new { animation: none; } }
+#pmem-sheet .pmem-aibar { flex-wrap: wrap; }
+#pmem-sheet .pmem-aibar > .menu_button { flex: 1 1 100%; width: 100%; min-height: 44px; justify-content: center; text-align: center; }
+#pmem-sheet .pmem-aibar > .menu_button.pmem-busy, #pmem-sheet .pmem-aibar > .menu_button.pmem-busy:disabled { opacity: 1 !important; filter: none !important; background: #2d4f7c !important; color: #fff !important; flex-direction: row; flex-wrap: nowrap; }
+#pmem-sheet .pmem-aibar > .menu_button.pmem-armed { background: #b8860b !important; color: #fff !important; }

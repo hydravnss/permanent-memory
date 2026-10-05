@@ -2,13 +2,15 @@
 //   node tests/mock-openai.mjs [port]   (défaut 9101)
 //   POST /_ctl {"queue":[...],"default":"ok"} · GET /_log · DELETE /_log
 //   GET  /_log  → requêtes reçues (messages envoyés au "modèle")     DELETE /_log → vide
+// Délai : {"delay": ms} global ou {kind, delay} par réponse.
 // Comportements : ok (texte variable) · empty (réponse vide) · error (HTTP 500) · slow (flux lent ~4 s) · hang (ne répond jamais)
 import http from 'node:http';
 
 const port = Number(process.argv[2] || 9101);
 let queue = [];
 let dflt = 'ok';
-let rules = []; // [{match: 'regex', text}] : répond ce texte si le prompt correspond
+let rules = [];
+let globalDelay = 0; // POST /_ctl {"delay": 3000} : délai appliqué à chaque réponse // [{match: 'regex', text}] : répond ce texte si le prompt correspond
 let counter = 0;
 const log = [];
 const WORDS = ['aurore', 'brume', 'cerisier', 'dragon', 'étoile', 'falaise', 'givre', 'horizon', 'iris', 'jasmin'];
@@ -24,6 +26,7 @@ const server = http.createServer((req, res) => {
             if (o.queue) queue = o.queue;
             if (o.default) dflt = o.default;
             if (o.rules) rules = o.rules;
+            if (o.delay !== undefined) globalDelay = Number(o.delay) || 0;
             return json(200, { queue, default: dflt });
         }
         if (url === '/_log') {
@@ -43,6 +46,10 @@ const server = http.createServer((req, res) => {
             if (kind === 'hang') return; // la connexion reste ouverte indéfiniment
             if (kind === 'error') return json(500, { error: { message: 'Erreur simulée par le faux backend', type: 'server_error' } });
             const out = kind === 'empty' ? '' : text;
+            const delay = Number((typeof behavior === 'object' && behavior.delay) || globalDelay) || 0; // délai de réponse simulé (ms)
+            if (delay && !res.delayed) { res.delayed = true; return setTimeout(() => { if (!res.destroyed) answer(); }, delay); }
+            return answer();
+            function answer() {
             if (!payload.stream) {
                 return json(200, { id: 'mock-' + counter, object: 'chat.completion', created: 0, model: 'mock-model', choices: [{ index: 0, message: { role: 'assistant', content: out }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
             }
@@ -62,6 +69,7 @@ const server = http.createServer((req, res) => {
                 }
             };
             tick();
+            }
             return;
         }
         json(404, { error: 'not found ' + url });

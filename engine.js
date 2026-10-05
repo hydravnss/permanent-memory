@@ -218,7 +218,7 @@ function toMsgs(from, to) {
  * Analyse locale gratuite. Elle ne sait PAS résumer : faits structurés fiables (reformulés) + — si `raw` — phrases brutes
  * signalées « extrait brut, à reformuler » (jamais acceptées d'un tap). `raw: false` = faits structurés seulement (détection automatique).
  */
-export function scanMessages(from, to, { notify = false, raw = true } = {}) {
+export function scanMessages(from, to, { notify = false, raw = S().scanRaw } = {}) {
     const s = S();
     const found = core.heuristicExtract(toMsgs(from, to), { minScore: s.heuristicsMinScore, raw });
     let added = 0;
@@ -229,7 +229,7 @@ export function scanMessages(from, to, { notify = false, raw = true } = {}) {
         if (!scope) continue;
         if (st.addCandidate({ ...f, scope, origin: 'local', src: { idx: f.idx, chat: ctx().getCurrentChatId?.() ?? null } })) added++;
     }
-    if (notify) st.toast(added ? 'success' : 'info', added ? `${added} candidat(s) trouvé(s) (analyse locale gratuite : faits simples + extraits bruts à reformuler)` : 'Aucun nouveau candidat trouvé');
+    if (notify) st.toast(added ? 'success' : 'info', added ? `${added} candidat(s) trouvé(s) (analyse locale gratuite : faits simples${raw ? ' + extraits bruts à reformuler' : ''})` : 'Aucun nouveau candidat trouvé');
     return added;
 }
 
@@ -350,7 +350,7 @@ function emptyExplanation({ retried, messages, maxTokens }) {
 }
 
 /** Extraction groupée par l'IA : UN appel pour les N derniers messages (un seul 2ᵉ essai, plus court, si la réponse est vide). */
-export async function runExtraction({ manual = false } = {}) {
+export async function runExtraction({ manual = false, onPhase = null } = {}) {
     const s = S();
     const cd = st.chatData(true);
     if (!cd) return { ok: false, reason: 'Aucun chat ouvert' };
@@ -369,6 +369,7 @@ export async function runExtraction({ manual = false } = {}) {
         prep = await prepareExtraction(manual, { short: true });
         maxTokens = Math.max(800, Math.min(2000, s.autoMaxTokens * 4));
         console.warn(LOG, 'Réponse vide, nouvel essai avec', prep.msgs.length, 'message(s) et', maxTokens, 'tokens max');
+        try { onPhase?.('retry'); } catch { /* ignore */ }
         const r2 = await callAI('Extraction (2ᵉ essai)', { ...prep.p, responseLength: maxTokens });
         if (!r2.ok) {
             const why = String(r2.reason || '');
@@ -386,11 +387,16 @@ export async function runExtraction({ manual = false } = {}) {
     const msgs = prep.msgs;
     cd.lastExtractIdx = (ctx().chat?.length || 1) - 1; // avancé même si 0 résultat : jamais de ré-essai automatique
     st.saveChatData();
-    const items = core.parseExtraction(r.text, s.autoMaxItems);
+    const parsed = core.parseExtraction(r.text, s.autoMaxItems);
+    // tri qualité : importance < minimum, ou simple geste / regard / ambiance sans enjeu → « fait mineur ignoré »
+    const { kept: items, minor } = core.filterFacts(parsed, { minImportance: s.minImportance });
+    if (minor.length) console.log(LOG, `${minor.length} fait(s) mineur(s) ignoré(s)`, minor.map((m) => `[${m.why}] ${m.text}`));
+    for (const it of items) it.keywords = core.cleanKeywords(it.keywords, it.text, 5);
     const lastMsg = msgs[msgs.length - 1];
     const g = st.currentGroup();
     const scope = g ? `group:${g.id}` : targetScopeFor({ is_user: false, name: ctx().name2, original_avatar: lastMsg.original_avatar });
-    let added = 0; let duplicates = 0; let copied = 0;
+    let added = 0; let duplicates = 0; let copied = 0; let direct = 0;
+    const ids = [];
     const known = [...knownMemoryTexts().map((text) => ({ text }))]; // doublon de sens avec N'IMPORTE QUELLE portée visible + ce qui vient d'être ajouté
     for (const it of items) {
         const src = { idx: lastMsg.idx, chat: ctx().getCurrentChatId?.() ?? null };
@@ -399,11 +405,11 @@ export async function runExtraction({ manual = false } = {}) {
         const copy = core.copyReason(it.text, msgs) ? 'copie' : '';
         if (copy) copied++;
         let ok = false;
-        if (s.autoToInbox || copy) ok = !!st.addCandidate({ ...it, scope, origin: 'ia', raw: copy, src });
-        else ok = !!st.addMemory(scope, { ...it, src }, { allowDuplicate: false }).entry;
+        if (s.autoToInbox || copy) { const c = st.addCandidate({ ...it, scope, origin: 'ia', raw: copy, src }); ok = !!c; if (c) ids.push(c.id); }
+        else { ok = !!st.addMemory(scope, { ...it, src }, { allowDuplicate: false }).entry; if (ok) direct++; }
         if (ok) { added++; known.push({ text: it.text }); } else duplicates++;
     }
-    return { ok: true, added, found: items.length, duplicates, copied, retried, messages: msgs.length, inputTokens: inTok, outTokens: outTok, raw: r.text };
+    return { ok: true, added, ids, direct, found: items.length, parsed: parsed.length, minor: minor.length, duplicates, copied, retried, messages: msgs.length, inputTokens: inTok, outTokens: outTok, raw: r.text };
 }
 
 /** Prépare le résumé de scène : N derniers messages, tronqués au budget d'entrée (les plus anciens d'abord). */
@@ -447,6 +453,10 @@ export async function runSceneSummary() {
     const r = await callAI('Résumé de scène', { ...prep.p, responseLength: s.autoMaxTokens });
     if (!r.ok) return r;
     const text = core.parseSceneSummary(r.text);
+    // « RIEN » (ou une scène faite uniquement de gestes / d'ambiance) : réponse valide, rien d'important à retenir
+    if (!isEmptyAnswer(r.text) && (!text || core.minorReason(text))) {
+        return { ok: true, added: 0, nothing: true, minor: text ? 1 : 0, ids: [], text: '', messages: prep.msgs.length, inputTokens: r.inputTokens, outTokens: r.outTokens };
+    }
     if (!text) {
         return { ok: false, empty: true, reason: 'Réponse vide de l’IA', inputTokens: r.inputTokens, outTokens: r.outTokens, detail: emptyExplanation({ retried: false, messages: prep.msgs.length, maxTokens: s.autoMaxTokens }).replace('Rien n’a été mémorisé.', 'Rien n’a été mémorisé (pas de nouvel essai automatique pour ne pas dépenser un 2ᵉ appel ; relance si tu veux).') };
     }
@@ -456,7 +466,7 @@ export async function runSceneSummary() {
     if (!scope) return { ok: false, reason: 'Aucune portée où ranger le résumé' };
     const copy = core.copyReason(text, prep.msgs) ? 'copie' : '';
     const cand = st.addCandidate({ text, type: 'evenement', importance: 3, keywords: core.autoKeywords(text, 5), scope, origin: 'ia', raw: copy, src: { idx: lastMsg.idx, chat: ctx().getCurrentChatId?.() ?? null } });
-    return { ok: true, added: cand ? 1 : 0, duplicate: !cand, text, messages: prep.msgs.length, inputTokens: r.inputTokens, outTokens: r.outTokens };
+    return { ok: true, added: cand ? 1 : 0, ids: cand ? [cand.id] : [], duplicate: !cand, text, messages: prep.msgs.length, inputTokens: r.inputTokens, outTokens: r.outTokens };
 }
 
 /** Résumé glissant : UN souvenir « résumé » par chat, mis à jour rarement. */

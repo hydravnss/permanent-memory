@@ -14,7 +14,7 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&a
 const fmtDate = (t) => (t ? new Date(t).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—');
 const fmtNum = (n) => Number(n || 0).toLocaleString('fr-FR');
 
-const ui = { open: false, tab: 'mem', scope: '__cur', q: '', type: '', status: 'actifs', sim: '', dupPairs: null, armed: null, lastResult: '' };
+const ui = { open: false, tab: 'mem', scope: '__cur', q: '', type: '', status: 'actifs', sim: '', dupPairs: null, armed: null, lastResult: '', job: null, arming: false, aiStatus: {}, highlight: new Set() };
 
 /* ------------------------------------------------------------------ réglages (liste de champs) */
 
@@ -37,7 +37,9 @@ const FIELDS = [
     { key: 'groupAllMembers', type: 'check', label: 'Groupes : injecter les souvenirs de tous les membres du groupe (+ groupe + monde). Décoché : seulement le perso qui parle.' },
     { key: 'groupIncludeMuted', type: 'check', label: 'Groupes : inclure aussi les membres « muets »' },
     { sec: 'Création des souvenirs' },
-    { key: 'heuristics', type: 'check', label: 'Détecter en local (gratuit) des faits simples : « X s’appelle… », « X habite… », goûts. Ne résume pas : seule l’IA résume.' },
+    { key: 'minImportance', type: 'num', label: 'Importance minimale (1–5) : les faits proposés moins importants sont ignorés (3 conseillé)', min: 1, max: 5 },
+    { key: 'heuristics', type: 'check', label: 'Analyse locale automatique à chaque message (gratuit) : faits simples « X s’appelle… », « X habite… », goûts. Désactivée par défaut (peu utile en RP).' },
+    { key: 'scanRaw', type: 'check', label: '« Analyser l’historique (gratuit) » : proposer aussi des extraits bruts du chat, à reformuler soi-même' },
     { key: 'heuristicsMinScore', type: 'num', label: 'Exigence de la détection locale (1 = large, 4 = strict)', min: 1, max: 6 },
     { key: 'messageButton', type: 'check', label: 'Bouton 🧠 « Mémoriser » sur chaque message' },
     { sec: 'IA (optionnel — coûte des crédits)' },
@@ -316,19 +318,20 @@ function renderCand() {
     const keys = st.viewerScopes().map((x) => x.key);
     const list = st.candidatesFor(keys);
     const nRaw = list.filter(isRaw).length;
-    let h = `<div class="pmem-note">Propositions à valider d'un tap : 🤖 <b>l'IA</b> écrit de petits résumés reformulés ; 🧮 l'analyse <b>locale gratuite</b> ne sait pas résumer — elle ne trouve que des faits très simples (« X s'appelle… », « X habite… », goûts) et signale le reste comme <b>extrait brut, à reformuler</b> (✎ Modifier). Rien n'est mémorisé sans ton accord.</div>
+    let h = `<div class="pmem-note">Propositions à valider d'un tap : 🤖 <b>l'IA</b> ne retient que l'important (relations, conflits, décisions, promesses, secrets, tournants), en petits résumés reformulés ; les faits mineurs (gestes, regards, ambiance, importance &lt; ${S().minImportance}) sont ignorés. 🧮 L'analyse <b>locale gratuite</b> ne sait pas résumer : elle ne trouve que des faits très simples (« X s'appelle… », « X habite… », goûts)${S().scanRaw ? ' et signale le reste comme <b>extrait brut, à reformuler</b> (✎ Modifier)' : ''}. Rien n'est mémorisé sans ton accord.</div>
 <div class="pmem-bar">
 <button type="button" class="menu_button" data-act="scan">🧮 Analyser l’historique (gratuit)</button>
 <button type="button" class="menu_button" data-act="acceptall"${list.length - nRaw > 0 ? '' : ' disabled'}>✓ Tout accepter${nRaw ? ' (sauf bruts)' : ''}</button>
 <button type="button" class="menu_button" data-act="rejectall"${list.length ? '' : ' disabled'}>✗ Tout rejeter</button>
 </div>`;
-    h += `<div class="pmem-bar">${aiButton('extract', '🤖 Extraire avec l’IA (1 appel)')}</div>`;
-    h += `<div class="pmem-bar">${aiButton('scene', '🎬 Résumer les derniers messages (1 appel)')}<span class="pmem-count">→ 1 candidat « événement » de 2 à 4 phrases (${S().sceneMessages} derniers messages)</span></div>`;
+    h += aiBlock('extract', '🤖 Extraire avec l’IA (1 appel)');
+    h += aiBlock('scene', '🎬 Résumer les derniers messages (1 appel)', `→ 1 candidat « événement » de 2 à 4 phrases (${S().sceneMessages} derniers messages)`);
     if (ui.lastResult) h += `<div class="pmem-note">${esc(ui.lastResult).replace(/\n/g, '<br>')}</div>`;
     if (!list.length) return h + '<div class="pmem-empty">Aucun candidat en attente 🎉</div>';
     return h + list.map((c) => {
         const raw = isRaw(c);
-        return `<div class="pmem-card cand${raw ? ' raw' : ''}" data-id="${c.id}">
+        const isNew = ui.highlight.has(c.id);
+        return `<div class="pmem-card cand${raw ? ' raw' : ''}${isNew ? ' pmem-new' : ''}" data-id="${c.id}">${isNew ? '<div class="pmem-newtag">🆕 Nouveau</div>' : ''}
 <div class="pmem-card-top"><span class="pmem-type">${core.TYPE_ICONS[c.type] || ''} ${esc(core.TYPES[c.type] || c.type)}</span><span class="pmem-meta">${c.origin === 'ia' ? '🤖 IA' : '🧮 local'} · ${esc(st.scopeLabel(c.scope))} · ★${c.importance}</span></div>
 ${raw ? `<div class="pmem-rawtag">${RAW_LABEL[c.raw] || RAW_LABEL.extrait}</div>` : ''}
 <div class="pmem-text">${esc(c.text)}</div>
@@ -336,13 +339,113 @@ ${raw ? `<div class="pmem-rawtag">${RAW_LABEL[c.raw] || RAW_LABEL.extrait}</div>
     }).join('');
 }
 
-/** Bouton IA à deux temps : 1er tap = estimation du coût, 2e tap = lancement. */
+const AI_RUNNING = { extract: '⏳ Extraction en cours…', scene: '⏳ Résumé de la scène en cours…', summary: '⏳ Résumé en cours…' };
+const AI_STARTED = { extract: 'Extraction lancée… (réponse de l’IA en général en 5 à 60 s)', scene: 'Résumé de la scène lancé… (réponse de l’IA en général en 5 à 60 s)', summary: 'Mise à jour du résumé lancée…' };
+const ARM_MS = 8000;
+const secs = () => (ui.job ? Math.max(0, Math.floor((Date.now() - ui.job.start) / 1000)) : 0);
+
+/**
+ * Bouton IA à deux temps : 1er tap = « Touche encore pour lancer (≈ N tokens) » (revient seul après 8 s),
+ * 2e tap = lancement ; pendant l'appel : bouton désactivé, spinner, compteur de secondes. Jamais deux lancements à la fois.
+ */
 function aiButton(kind, label) {
     const s = S();
     const blocked = s.neverAI ? 'Mode « Ne jamais appeler l’IA » actif' : '';
     if (blocked) return `<button type="button" class="menu_button" disabled>${esc(label)}</button><span class="pmem-count">🚫 ${esc(blocked)}</span>`;
-    if (ui.armed === kind) return `<button type="button" class="menu_button pmem-armed" data-act="ai-${kind}">⚠️ Confirmer ? (≈ ${fmtNum(ui.armedCost || 0)} tokens)</button>`;
+    if (ui.job?.kind === kind) {
+        const txt = ui.job.phase === 'retry' ? '⏳ Nouvel essai…' : AI_RUNNING[kind];
+        return `<button type="button" class="menu_button pmem-busy" data-act="ai-${kind}" disabled aria-busy="true"><span class="pmem-spin" aria-hidden="true"></span><span class="pmem-busy-txt">${esc(txt)}</span> <span class="pmem-secs">${secs()} s</span></button>`;
+    }
+    if (ui.job || eng.state.running) return `<button type="button" class="menu_button" data-act="ai-${kind}" disabled>${esc(label)}</button><span class="pmem-count">⏳ un autre appel est en cours…</span>`;
+    if (ui.armed === kind) return `<button type="button" class="menu_button pmem-armed" data-act="ai-${kind}">👉 Touche encore pour lancer (≈ ${fmtNum(ui.armedCost || 0)} tokens)</button>`;
     return `<button type="button" class="menu_button" data-act="ai-${kind}">${esc(label)}</button>`;
+}
+
+/** Bouton + aide (état « armé ») + statut sous le bouton (en cours / résultat). */
+function aiBlock(kind, label, extra = '') {
+    let h = `<div class="pmem-bar pmem-aibar" data-ai="${kind}">${aiButton(kind, label)}${extra && !ui.job && ui.armed !== kind ? `<span class="pmem-count">${esc(extra)}</span>` : ''}</div>`;
+    if (S().neverAI) return h;
+    if (ui.armed === kind && !ui.job) h += `<div class="pmem-help" data-help="${kind}">Ce 2ᵉ tap enverra 1 requête à l’IA (comptée dans le plafond du jour). Sans 2ᵉ tap, rien n’est envoyé : le bouton revient à la normale dans 8 s.</div>`;
+    else if (ui.job?.kind === kind) h += `<div class="pmem-ai-status pmem-st-run" id="pmem-st-${kind}">L’IA travaille… tu peux attendre ici, le résultat s’affichera sous ce bouton.</div>`;
+    else if (ui.aiStatus[kind]) { const st0 = ui.aiStatus[kind]; h += `<div class="pmem-ai-status pmem-st-${st0.kind}" id="pmem-st-${kind}">${esc(st0.text).replace(/\n/g, '<br>')}</div>`; }
+    return h;
+}
+
+/** Met à jour le compteur de secondes sans tout redessiner. */
+let tickTimer = null;
+function startTicker() {
+    clearInterval(tickTimer);
+    tickTimer = setInterval(() => {
+        if (!ui.job) { clearInterval(tickTimer); tickTimer = null; return; }
+        for (const el of $$('#pmem-sheet .pmem-secs')) el.textContent = `${secs()} s`;
+    }, 1000);
+}
+
+/** Lance un appel IA avec retour visuel complet. `run(onPhase)` renvoie le résultat ; `describe(r)` → { kind, text, toast }. */
+async function launchAI(kind, run, describe) {
+    if (ui.job || eng.state.running) { st.toast('info', 'Un appel est déjà en cours, patiente…'); return; }
+    ui.armed = null; clearTimeout(arm.t);
+    ui.job = { kind, phase: 'run', start: Date.now() };
+    ui.aiStatus[kind] = null;
+    ui.highlight = new Set();
+    st.toast('info', AI_STARTED[kind], { timeOut: 2500 });
+    if (ui.open) renderSheet();
+    startTicker();
+    let r;
+    try {
+        r = await run((phase) => { if (ui.job?.kind === kind) { ui.job.phase = phase; if (ui.open) renderSheet(); } });
+    } catch (e) {
+        r = { ok: false, reason: `Erreur inattendue : ${e?.message || e}` };
+    }
+    const took = secs();
+    ui.job = null;
+    clearInterval(tickTimer); tickTimer = null;
+    const d = describe(r, took);
+    ui.aiStatus[kind] = { kind: d.kind, text: d.text };
+    ui.highlight = new Set(r?.ids || []);
+    st.toast(d.kind === 'ok' ? 'success' : d.kind === 'none' ? 'info' : 'warning', d.toast, { timeOut: d.kind === 'err' ? 6000 : 4000 });
+    if (ui.open) {
+        renderSheet();
+        // amène l'œil sur les nouveaux candidats (ou sur le statut)
+        requestAnimationFrame(() => {
+            const first = $('#pmem-sheet .pmem-card.pmem-new') || $(`#pmem-st-${kind}`);
+            try { first?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { first?.scrollIntoView(); }
+        });
+    }
+    return r;
+}
+
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+
+function describeExtraction(r, took) {
+    if (!r.ok) {
+        const text = `❌ Extraction non effectuée : ${r.reason}${r.detail ? `\n${r.detail}` : ''}`;
+        return { kind: 'err', text, toast: `Extraction non effectuée : ${r.reason}` };
+    }
+    const extras = [];
+    if (r.minor) extras.push(`${plural(r.minor, 'fait mineur ignoré', 'faits mineurs ignorés')}`);
+    if (r.duplicates) extras.push(`${plural(r.duplicates, 'déjà connu ignoré', 'déjà connus ignorés')}`);
+    if (r.copied) extras.push(`${r.copied} à reformuler (ressemble à une copie du chat)`);
+    if (r.retried) extras.push('1ʳᵉ réponse vide → 2ᵉ essai plus court réussi');
+    const foot = `${r.messages} message(s) analysé(s) · ≈ ${fmtNum(r.inputTokens + r.outTokens)} tokens · ${took} s`;
+    if (r.added) {
+        const head = r.direct && r.direct === r.added ? `✅ ${plural(r.added, 'souvenir ajouté', 'souvenirs ajoutés')} directement à la mémoire` : `✅ ${plural(r.added, 'souvenir proposé', 'souvenirs proposés')} ci-dessous`;
+        return { kind: 'ok', text: `${head}${extras.length ? ` (${extras.join(', ')})` : ''}\n${foot}`, toast: head.replace('✅ ', '') };
+    }
+    return { kind: 'none', text: `Rien d’important trouvé${extras.length ? ` — ${extras.join(', ')}` : ''}.\n${foot}`, toast: `Rien d’important trouvé${r.minor ? ` (${plural(r.minor, 'fait mineur ignoré', 'faits mineurs ignorés')})` : ''}` };
+}
+
+function describeScene(r, took) {
+    if (!r.ok) return { kind: 'err', text: `❌ Résumé non effectué : ${r.reason}${r.detail ? `\n${r.detail}` : ''}`, toast: `Résumé non effectué : ${r.reason}` };
+    const foot = `${r.messages} message(s) · ≈ ${fmtNum(r.inputTokens + r.outTokens)} tokens · ${took} s`;
+    if (r.nothing) return { kind: 'none', text: `Rien d’important trouvé dans la scène${r.minor ? ' (seulement des gestes / de l’ambiance : 1 fait mineur ignoré)' : ''}.\n${foot}`, toast: 'Rien d’important trouvé dans la scène' };
+    if (r.added) return { kind: 'ok', text: `✅ 1 souvenir proposé ci-dessous (résumé de la scène, ${r.messages} derniers messages) : vérifie-le puis ✓ Garder.\n${foot}`, toast: '1 souvenir proposé (résumé de la scène)' };
+    return { kind: 'none', text: `Ce résumé de la scène a déjà été proposé ou rejeté : rien ajouté.\n${foot}`, toast: 'Résumé déjà proposé auparavant : rien ajouté' };
+}
+
+function describeSummary(r) {
+    if (!r.ok) return { kind: 'err', text: `❌ Résumé non mis à jour : ${r.reason}${r.detail ? `\n${r.detail}` : ''}`, toast: r.reason };
+    return { kind: 'ok', text: '✅ Résumé mis à jour (souvenir « Résumé » épinglé).', toast: 'Résumé mis à jour' };
 }
 
 /* ---- onglet Injection */
@@ -424,7 +527,7 @@ ${st.storeStatus.error ? `<div class="pmem-warn">⚠️ Stockage : ${esc(st.stor
 
 function renderTools() {
     let h = `<div class="pmem-sec2"><h4>Résumé glissant</h4><div class="pmem-note">Un seul souvenir « Résumé » par chat, toujours injecté (épinglé). 1 appel IA, plafonné.</div>
-<div class="pmem-bar">${aiButton('summary', '📝 Mettre à jour le résumé (IA)')}</div></div>
+${aiBlock('summary', '📝 Mettre à jour le résumé (IA)')}</div>
 <div class="pmem-sec2"><h4>Doublons</h4><div class="pmem-bar"><select id="pmem-dupscope" class="text_pole">${scopeOptions(ui.scope === '__cur' ? (st.viewerScopes()[0]?.key || 'world') : ui.scope)}</select><button type="button" class="menu_button" data-act="finddup">🔍 Chercher (gratuit)</button></div>`;
     if (ui.dupPairs) {
         h += ui.dupPairs.pairs.length ? ui.dupPairs.pairs.map((p, i) => `<div class="pmem-card"><div class="pmem-meta">similarité ${Math.round(p.score * 100)} %</div><div class="pmem-text">A : ${esc(p.a.text)}</div><div class="pmem-text">B : ${esc(p.b.text)}</div><div class="pmem-actions"><button type="button" data-act="merge" data-i="${i}" class="ok">🧬 Fusionner (garde A)</button><button type="button" data-act="dismissdup" data-i="${i}">Ignorer</button></div></div>`).join('') : '<div class="pmem-empty">Aucun doublon 👍</div>';
@@ -460,7 +563,7 @@ function onSheetInput(e) {
 function arm(kind, cost) {
     ui.armed = kind; ui.armedCost = cost;
     clearTimeout(arm.t);
-    arm.t = setTimeout(() => { if (ui.armed === kind) { ui.armed = null; if (ui.open) renderSheet(); } }, 6000);
+    arm.t = setTimeout(() => { if (ui.armed === kind) { ui.armed = null; if (ui.open) renderSheet(); } }, kind === 'wipe' ? 6000 : ARM_MS);
 }
 
 async function onSheetClick(e) {
@@ -496,31 +599,26 @@ async function onSheetClick(e) {
         case 'scan': {
             const last = (ctx().chat?.length || 1) - 1;
             const n = eng.scanMessages(last - 40, last, { notify: true });
-            ui.lastResult = `Analyse locale de l’historique récent : ${n} nouveau(x) candidat(s) (faits simples + extraits bruts à reformuler). Coût : 0. Pour de vrais petits résumés, utilise l’IA.`;
+            ui.lastResult = `Analyse locale de l’historique récent : ${n} nouveau(x) candidat(s) (faits simples${S().scanRaw ? ' + extraits bruts à reformuler' : ' seulement ; extraits bruts désactivés dans les réglages'}). Coût : 0. Pour retenir l’important (relations, décisions, secrets…), utilise l’IA.`;
             renderSheet(); break;
         }
-        case 'ai-extract': {
-            if (ui.armed !== 'extract') { const est = await eng.estimateExtraction(); arm('extract', est.input + est.output); renderSheet(); break; }
-            ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Extraction…';
-            const r = await eng.runExtraction({ manual: true });
-            ui.lastResult = r.ok ? `Extraction IA : ${r.found} souvenir(s) résumé(s) à partir de ${r.messages} message(s), ${r.added} nouveau(x) candidat(s)${r.duplicates ? `, ${r.duplicates} déjà connu(s) ignoré(s)` : ''}${r.copied ? `, dont ${r.copied} qui ressemble(nt) à une copie du chat (à reformuler)` : ''} · ≈ ${r.inputTokens + r.outTokens} tokens${r.retried ? ' (1ʳᵉ réponse vide → 2ᵉ essai plus court réussi)' : ''}.` : `Extraction non effectuée : ${r.detail || r.reason}`;
-            if (!r.ok) st.toast('warning', r.reason);
-            renderSheet(); break;
-        }
-        case 'ai-scene': {
-            if (ui.armed !== 'scene') { const est = await eng.estimateScene(); arm('scene', est.input + est.output); renderSheet(); break; }
-            ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Résumé de la scène…';
-            const r = await eng.runSceneSummary();
-            ui.lastResult = r.ok ? (r.added ? `Résumé de la scène (${r.messages} derniers messages) ajouté aux candidats · ≈ ${r.inputTokens + r.outTokens} tokens. Vérifie-le puis ✓ Garder.` : `Résumé de la scène déjà proposé ou rejeté auparavant : rien ajouté · ≈ ${r.inputTokens + r.outTokens} tokens.`) : `Résumé non effectué : ${r.detail || r.reason}`;
-            if (!r.ok) st.toast('warning', r.reason);
-            renderSheet(); break;
-        }
+        case 'ai-extract':
+        case 'ai-scene':
         case 'ai-summary': {
-            if (ui.armed !== 'summary') { arm('summary', S().summaryMaxTokens + 600); renderSheet(); break; }
-            ui.armed = null; btn.disabled = true; btn.textContent = '⏳ Résumé…';
-            const r = await eng.runSummary({ manual: true });
-            st.toast(r.ok ? 'success' : 'warning', r.ok ? 'Résumé mis à jour' : r.reason);
-            renderSheet(); break;
+            const kind = act.slice(3);
+            if (ui.job || eng.state.running || ui.arming) return; // jamais de double lancement
+            if (ui.armed !== kind) {
+                ui.arming = true;
+                try {
+                    const est = kind === 'extract' ? await eng.estimateExtraction() : kind === 'scene' ? await eng.estimateScene() : { input: 600, output: S().summaryMaxTokens };
+                    arm(kind, est.input + est.output);
+                } finally { ui.arming = false; }
+                renderSheet(); break;
+            }
+            if (kind === 'extract') await launchAI(kind, (onPhase) => eng.runExtraction({ manual: true, onPhase }), describeExtraction);
+            else if (kind === 'scene') await launchAI(kind, () => eng.runSceneSummary(), describeScene);
+            else await launchAI(kind, () => eng.runSummary({ manual: true }), describeSummary);
+            break;
         }
         case 'sim': ui.sim = $('#pmem-sim')?.value || ''; loadInjPreview(); break;
         case 'refresh': loadInjPreview(); break;

@@ -27,7 +27,7 @@ await P((lines) => {
     c.chat.length = 1;
     lines.forEach(([name, mes], i) => c.chat.push({ name: name === 'Léo' ? c.name1 : name, is_user: name === 'Léo', is_system: false, send_date: Date.now(), mes }));
 }, LINES);
-await setS({ enabled: true, neverAI: false, autoExtract: false, autoSummary: false, maxCallsPerDay: 20, maxTokensPerMonth: 5000000, autoMaxTokens: 700, autoMaxItems: 8, extractMessages: 40, extractInputTokens: 4000, sceneMessages: 12, autoToInbox: true, heuristics: false });
+await setS({ enabled: true, neverAI: false, autoExtract: false, autoSummary: false, maxCallsPerDay: 20, maxTokensPerMonth: 5000000, autoMaxTokens: 700, autoMaxItems: 10, extractMessages: 40, extractInputTokens: 4000, sceneMessages: 12, autoToInbox: true, heuristics: false });
 await P(() => { const s = globalThis.permanentMemory.store; s.store.candidates.length = 0; s.store.rejected.length = 0; s.resetStats(); });
 // un souvenir déjà connu (doit être envoyé en contexte compact et ne pas être re-proposé)
 const charKey = await P(() => { const c = SillyTavern.getContext(); return `char:${c.characters[c.characterId].avatar}`; });
@@ -43,6 +43,7 @@ const AI_ANSWER = [
     'lieu|3|La vieille tour de guet, dans la forêt de Valmont, sera le refuge où Léo et Seraphina partent demain à l\'aube.|tour de guet,forêt',
     "evenement|2|Nous partirons demain matin avant le lever du soleil vers la forêt de Valmont, là où se trouve la vieille tour de guet.|départ",
     'fait|3|Seraphina dit « je suis la fille cachée du roi » à Léo.|Seraphina',
+    'evenement|4|Seraphina fixa longuement la porte par laquelle Léo avait disparu.|porte,laquelle',
 ].join('\n');
 const SCENE_ANSWER = "Léo et Seraphina se confient l'un à l'autre : Seraphina révèle qu'elle est la fille cachée du roi et Léo jure de garder le secret et de l'aider à reprendre le trône. Elle redoute le maire Dorian, qui finance en secret la bande attaquant le village. Ils décident de partir à l'aube vers la tour de guet de la forêt de Valmont.";
 await mockClear();
@@ -56,16 +57,16 @@ console.log('résultat :', JSON.stringify({ ...r, raw: undefined }));
 ok(r.ok && log.length === 1, 'Extraction IA : 1 seul appel');
 const sent = promptText(log[0]);
 ok(/Souvenirs déjà connus/.test(sent) && /Léo est forgeron à Valmont depuis dix ans/.test(sent), 'Les souvenirs existants sont envoyés en contexte compact (pour ne pas les répéter)');
-ok(/troisième personne/.test(sent) && /AUCUNE phrase ni réplique/.test(sent) && /10 à 25 mots/.test(sent) && /relation\|4\|Mara se méfie/.test(sent), 'Le prompt demande des faits courts reformulés à la 3ᵉ personne, interdit les répliques, contient des exemples');
+ok(/troisième personne/.test(sent) && /AUCUNE phrase ni réplique/.test(sent) && /10 à 25 mots/.test(sent) && /Marcus veut que Gaius empêche Livia de recommencer/.test(sent) && /✗ Marcus fixa longuement la porte/.test(sent) && /réponds RIEN/.test(sent), 'Le prompt demande des faits courts reformulés à la 3ᵉ personne, interdit les répliques, contient des exemples');
 ok(/type\|importance\(1-5\)\|souvenir\|mot-clé1,mot-clé2/.test(sent), 'Format de sortie inchangé (type|importance|souvenir|mots-clés)');
 
 // ---- 2. résultats : dédup + copie signalée
-ok(r.found === 8, `8 lignes analysées : ${r.found}`);
+ok(r.parsed === 9 && r.found === 7 && r.minor === 2, `9 lignes lues, 2 faits mineurs ignorés (importance 2 + regard vers la porte), 7 gardés : ${r.parsed}/${r.minor}/${r.found}`);
 ok(r.duplicates >= 1, `Doublon de sens avec un souvenir existant ignoré (${r.duplicates})`);
-ok(r.copied === 2, `Copie du chat (phrase de 10+ mots) et guillemets détectées : ${r.copied}`);
+ok(r.copied === 1, `Guillemets détectés (la phrase recopiée d'importance 2 est déjà écartée comme mineure) : ${r.copied}`);
 const cands = await P(() => globalThis.permanentMemory.store.store.candidates.map((c) => ({ id: c.id, text: c.text, raw: c.raw, origin: c.origin, type: c.type })));
-ok(cands.length === 7 - 0 && !cands.some((c) => /exerce le métier/.test(c.text)), `Candidats : ${cands.length} (doublon absent)`);
-ok(cands.filter((c) => c.raw === 'copie').length === 2, 'Les 2 copies sont signalées « copie » (à reformuler)');
+ok(cands.length === 6 && !cands.some((c) => /exerce le métier|fixa longuement|Nous partirons/.test(c.text)), `Candidats : ${cands.length} (doublon et faits mineurs absents)`);
+ok(cands.filter((c) => c.raw === 'copie').length === 1, 'La copie (guillemets) est signalée « copie » (à reformuler)');
 ok(cands.filter((c) => !c.raw).every((c) => !/[«»"]/.test(c.text) && !/\b(je|tu)\b/i.test(c.text)), 'Candidats propres : 3ᵉ personne, pas de guillemets');
 
 // ---- 3. affichage UI des candidats
@@ -73,9 +74,9 @@ await P(() => globalThis.permanentMemory.ui.openSheet('cand'));
 await page.waitForTimeout(700);
 let txt = await sheet();
 ok(/fille cachée du roi/.test(txt) && /Ressemble à une copie du chat, à reformuler/.test(txt), 'UI : candidats reformulés affichés + badge « copie » sur les copies');
-ok(await page.locator('.pmem-card.cand.raw').count() === 2 && await page.locator('.pmem-card.cand.raw [data-act="c-ok"]').count() === 0, 'UI : les candidats « copie » n’ont pas de bouton ✓ Garder (seulement ✎ Modifier / ✗ Rejeter)');
+ok(await page.locator('.pmem-card.cand.raw').count() === 1 && await page.locator('.pmem-card.cand.raw [data-act="c-ok"]').count() === 0, 'UI : les candidats « copie » n’ont pas de bouton ✓ Garder (seulement ✎ Modifier / ✗ Rejeter)');
 ok(/Tout accepter \(sauf bruts\)/.test(txt), 'UI : « Tout accepter (sauf bruts) »');
-ok(/seule l|ne sait pas résumer/.test(txt) && /extrait brut, à reformuler/.test(txt), 'UI : explication courte « seule l’IA résume »');
+ok(/ne sait pas résumer/.test(txt) && /faits mineurs/.test(txt) && !/extrait brut, à reformuler/.test(txt), 'UI : explication courte (l’IA ne retient que l’important ; extraits bruts non mentionnés par défaut)');
 await shot(page, '20-candidats-resumes');
 
 // ---- 4. acceptation
@@ -86,7 +87,7 @@ ok(await P((k) => globalThis.permanentMemory.store.getList(k, false).length, cha
 await page.locator('[data-act="acceptall"]').tap();
 await page.waitForTimeout(600);
 const after = await P((k) => ({ mem: globalThis.permanentMemory.store.getList(k, false).length, left: globalThis.permanentMemory.store.store.candidates.map((c) => c.raw) }), charKey);
-ok(after.mem === before + 1 + 4 && after.left.length === 2 && after.left.every((x) => x === 'copie'), `« Tout accepter » ne prend pas les bruts : ${after.mem} souvenirs, ${after.left.length} brut(s) restant(s)`);
+ok(after.mem === before + 1 + 4 && after.left.length === 1 && after.left.every((x) => x === 'copie'), `« Tout accepter » ne prend pas les bruts : ${after.mem} souvenirs, ${after.left.length} brut(s) restant(s)`);
 // ✎ Modifier une copie → reformulation → accepté
 await page.locator('.pmem-card.cand.raw [data-act="c-edit"]').first().tap();
 await page.waitForSelector('#pmem-d-text');
@@ -94,14 +95,14 @@ ok(/Extrait brut : reformule-le/.test(await P(() => document.querySelector('#pme
 await page.fill('#pmem-d-text', 'Léo et Seraphina quittent le village à l’aube pour rejoindre la tour de guet.');
 await page.locator('#pmem-d-save').tap();
 await page.waitForTimeout(600);
-ok(await P((k) => globalThis.permanentMemory.store.getList(k, false).some((m) => /quittent le village à l’aube/.test(m.text)), charKey) && await P(() => globalThis.permanentMemory.store.store.candidates.length === 1), 'Copie reformulée via ✎ Modifier → acceptée');
+ok(await P((k) => globalThis.permanentMemory.store.getList(k, false).some((m) => /quittent le village à l’aube/.test(m.text)), charKey) && await P(() => globalThis.permanentMemory.store.store.candidates.length === 0), 'Copie reformulée via ✎ Modifier → acceptée');
 
 // ---- 5. dédup : relancer la même extraction n’ajoute rien de nouveau
 await P(() => { globalThis.permanentMemory.store.store.candidates.length = 0; });
 await mockClear(); await mock({ rules: [{ match: "mémoire à long terme d'un jeu de rôle", text: AI_ANSWER }] });
 r = await run();
 const sent2 = promptText((await mockLog()).filter(isExtraction)[0]);
-ok(r.ok && r.added <= 2 && r.duplicates >= 5, `Relance : déjà connus ignorés (${r.duplicates} doublons, ${r.added} ajouté(s), dont les 2 copies/quotes)`);
+ok(r.ok && r.added <= 2 && r.duplicates >= 4, `Relance : déjà connus ignorés (${r.duplicates} doublons, ${r.added} ajouté(s), dont les 2 copies/quotes)`);
 ok(/Souvenirs déjà connus/.test(sent2) && /fille cachée du roi/.test(sent2), 'Les souvenirs acceptés repartent en contexte (« déjà connus »)');
 
 // ---- 6. résumé de scène
@@ -113,9 +114,9 @@ ok(await page.locator('[data-act="ai-scene"]').count() === 1, 'UI : bouton « R�
 await page.locator('[data-act="ai-scene"]').first().tap();
 await page.waitForTimeout(500);
 ok((await mockLog()).length === 0, 'Résumé de scène : 1er tap = estimation seulement, aucun appel');
-ok(/Confirmer \? \(≈ [\d\s\u202f\u00a0,]+ tokens\)/.test(await page.locator('[data-act="ai-scene"]').first().innerText()), 'Résumé de scène : confirmation de coût affichée');
+ok(/Touche encore pour lancer \(≈ [\d\s\u202f\u00a0,]+ tokens\)/.test(await page.locator('[data-act="ai-scene"]').first().innerText()), 'Résumé de scène : « Touche encore pour lancer (≈ N tokens) » affiché');
 await page.locator('[data-act="ai-scene"]').first().tap();
-await page.waitForFunction(() => /Résumé de la scène \(/.test(document.querySelector('#pmem-sheet')?.innerText || ''), null, { timeout: 30000 });
+await page.waitForFunction(() => /1 souvenir proposé ci-dessous/.test(document.querySelector('#pmem-sheet')?.innerText || ''), null, { timeout: 30000 });
 log = (await mockLog()).filter(isScene);
 ok(log.length === 1 && (await mockLog()).length === 1, 'Résumé de scène : exactement 1 appel IA');
 ok(/2 à 4 phrases/.test(promptText(log[0])) && /Seraphina: /.test(promptText(log[0])), 'Prompt de scène envoyé (2 à 4 phrases + messages)');
@@ -145,6 +146,14 @@ await P(() => globalThis.permanentMemory.ui.openSheet('cand'));
 await page.waitForTimeout(400);
 await page.locator('[data-act="scan"]').tap();
 await page.waitForTimeout(800);
+const loc0 = await P(() => globalThis.permanentMemory.store.store.candidates.map((c) => ({ text: c.text, raw: c.raw })));
+ok(loc0.every((c) => !c.raw), `« Analyser l’historique » par défaut : aucun extrait brut (${loc0.length} fait(s) simple(s))`);
+await P(() => { globalThis.permanentMemory.store.store.candidates.length = 0; });
+await setS({ scanRaw: true });
+await P(() => globalThis.permanentMemory.ui.openSheet('cand'));
+await page.waitForTimeout(400);
+await page.locator('[data-act="scan"]').tap();
+await page.waitForTimeout(800);
 const loc = await P(() => globalThis.permanentMemory.store.store.candidates.map((c) => ({ text: c.text, raw: c.raw, origin: c.origin })));
 console.log('locaux :', JSON.stringify(loc));
 ok(loc.length > 0 && loc.every((c) => c.origin === 'local'), `Analyse locale : ${loc.length} candidat(s) local(aux)`);
@@ -156,6 +165,7 @@ ok(/Extrait brut, à reformuler/.test(txt) && /seule l’IA|ne sait pas résumer
 ok(await page.locator('.pmem-card.cand.raw [data-act="c-edit"]').count() >= 1 && await page.locator('.pmem-card.cand.raw [data-act="c-ok"]').count() === 0, 'UI : les extraits bruts proposent ✎ Modifier (pas ✓ Garder)');
 await shot(page, '22-analyse-locale');
 ok((await mockLog()).length === 0, 'Analyse locale : 0 appel IA');
+await setS({ scanRaw: false });
 // détection automatique (nouveau message) : jamais de phrase brute
 await P(() => { globalThis.permanentMemory.store.store.candidates.length = 0; });
 await setS({ heuristics: true });
@@ -184,12 +194,23 @@ const mig = await P(() => {
     };
 });
 console.log('migration :', JSON.stringify(mig));
-ok(JSON.stringify(mig.old) === '[5,8,700,4000,3]', 'Migration : 2 / 4 / 400 / 3000 (anciens défauts) → 5 / 8 / 700 / 4000');
+ok(JSON.stringify(mig.old) === '[5,8,700,4000,4]', 'Migration : 2 / 4 / 400 / 3000 (anciens défauts) → 5 / 8 / 700 / 4000');
 ok(mig.custom[0] === 3 && mig.custom[1] === 6 && mig.custom[2] === 900 && mig.custom[3] === 2500, 'Migration : valeurs personnalisées conservées');
 ok(mig.ten[0] === 10, 'Migration : plafond 10 conservé');
 ok(mig.eco[0] === 2, 'Migration : préréglage Économie (2 volontaire) conservé');
 ok(mig.fresh[0] === 5 && mig.fresh[1] === 8, 'Nouveau réglage : plafond 5 par défaut');
-ok(mig.again[0] === 2, 'Pas de re-migration une fois en version 3');
+ok(mig.again[0] === 2, 'Pas de re-migration du plafond une fois en version 3');
+// 1.2.0 : analyse locale automatique → off si l'ancien défaut (on) est en place ; une fois en v4, un « on » choisi est respecté
+const mig4 = await P(() => {
+    const e = SillyTavern.getContext().extensionSettings.permanent_memory;
+    const S = globalThis.permanentMemory.settings;
+    Object.assign(e, { settingsVersion: 3, heuristics: true }); delete e.minImportance; delete e.scanRaw;
+    const a = S(); const r1 = [a.heuristics, a.minImportance, a.scanRaw, a.settingsVersion];
+    e.heuristics = true; const r2 = S().heuristics;
+    e.heuristics = false;
+    return { r1, r2 };
+});
+ok(JSON.stringify(mig4.r1) === '[false,3,false,4]' && mig4.r2 === true, `Migration 1.2.0 : analyse auto off, importance min. 3, extraits bruts off ; choix ultérieur respecté (${JSON.stringify(mig4)})`);
 await setS({ maxCallsPerDay: 20, preset: 'equilibre' });
 
 ok(errs.length === 0, `Aucune erreur console/page (${errs.length}) ${errs.join(' | ')}`);

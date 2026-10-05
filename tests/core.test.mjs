@@ -78,14 +78,19 @@ t('parseExtraction tolérant : JSON, ```, texte autour, réflexion', () => {
     assert.equal(core.parseExtraction('["Mara possède une épée runique"]', 6).length, 1);
     assert.equal(core.stripModelNoise('<think>x</think>  ').length, 0);
 });
-t('1.1.0 prompt d’extraction : résumés reformulés, exemples, dédoublonnage, format conservé', () => {
+t('1.2.0 prompt d’extraction : faits importants seulement, exemples bon/mauvais, dédoublonnage, format conservé', () => {
     const msgs = [{ name: 'Léo', mes: 'Bonjour Mara.' }, { name: 'Mara', mes: 'Salut.' }];
     const p = core.buildExtractionPrompt(msgs, { maxItems: 8, existing: ['Léo est forgeron à Valmont.', 'Mara se méfie de Théo.'] });
     assert.match(p.systemPrompt, /mémoire à long terme d'un jeu de rôle/);
     assert.match(p.systemPrompt, /type\|importance\(1-5\)\|souvenir\|mot-clé1,mot-clé2/); // format de sortie inchangé
     assert.match(p.systemPrompt, /troisième personne/); assert.match(p.systemPrompt, /10 à 25 mots/);
     assert.match(p.systemPrompt, /AUCUNE phrase ni réplique/); assert.match(p.systemPrompt, /Au maximum 8 lignes/);
-    for (const k of ['relations entre personnages', 'événements marquants', 'décisions', 'promesses', 'secrets', 'préférences', 'état émotionnel durable', 'lieux et objets']) assert.ok(p.systemPrompt.includes(k), k);
+    for (const k of ['relations entre personnages', 'jalousie', 'rivalité', 'trahison', 'alliance', 'conflits', 'décisions', 'promesses', 'menaces', 'secrets révélés', 'tournants de l\'intrigue', 'changements de statut', 'faits durables', 'lieux et objets clés']) assert.ok(p.systemPrompt.includes(k), k);
+    for (const k of ['gestes', 'regards', 'mouvements', 'ambiance', 'décor', 'répliques ponctuelles', 'émotions passagères', 'réponds RIEN', 'Moins de faits, mais forts']) assert.ok(p.systemPrompt.includes(k), k);
+    assert.match(p.systemPrompt, /✗ Marcus fixa longuement la porte par laquelle Livia avait disparu/);
+    assert.match(p.systemPrompt, /Marcus veut que Gaius empêche Livia de recommencer/);
+    // un contre-exemple recopié par le modèle n'est jamais pris pour un fait
+    assert.equal(core.parseExtraction('✗ Marcus fixa la porte.\nrelation|4|Livia a trahi Marcus auprès du préfet Severus.|Livia', 8).length, 1);
     // les exemples du prompt sont eux-mêmes parsables par le parseur existant
     const ex = p.systemPrompt.split('\n').filter((l) => /^(relation|evenement|objectif|preference|lieu)\|/.test(l));
     assert.ok(ex.length >= 4);
@@ -134,6 +139,28 @@ t('résumé de scène : prompt + nettoyage de la réponse', () => {
     assert.match(p.systemPrompt, /résumes la scène récente/); assert.match(p.systemPrompt, /2 à 4 phrases/); assert.match(p.prompt, /Messages :\nLéo: Salut/);
     assert.equal(core.parseSceneSummary('<think>hmm</think>Résumé : « Léo et Mara quittent Valmont. Ils jurent de revenir. »'), 'Léo et Mara quittent Valmont. Ils jurent de revenir.');
     assert.equal(core.parseSceneSummary(''), '');
+    assert.equal(core.parseSceneSummary('RIEN.'), '');
+    assert.match(p.systemPrompt, /INTERDIT/); assert.match(p.systemPrompt, /réponds RIEN/);
     assert.ok(core.parseSceneSummary('Phrase. '.repeat(200)).length <= 600);
+});
+t('1.2.0 faits mineurs : gestes / regards écartés, enjeux gardés, importance minimale', () => {
+    const bad = ['Marcus fixa la porte par laquelle Livia avait disparu.', 'Octavie sourit doucement en regardant le soleil couchant.', 'Gaius se leva et s\'approcha de la fenêtre.', 'Livia croisa les bras et soupira.'];
+    const good = ['Marcus veut que Gaius empêche Livia de recommencer, il le juge devenu trop sûr de lui.', 'Livia a trahi Marcus en livrant ses lettres au préfet.', 'Octavie est jalouse de Livia.', 'Gaius a été nommé centurion de la garde.', 'Severus regarde Livia avec méfiance depuis qu\'elle a menacé sa sœur.'];
+    for (const b of bad) assert.ok(core.minorReason(b), 'mineur : ' + b);
+    for (const g of good) assert.equal(core.minorReason(g), '', 'important : ' + g);
+    const r = core.filterFacts([{ text: good[1], importance: 5 }, { text: bad[0], importance: 4 }, { text: 'Gaius aime le vin de Falerne.', importance: 2 }], { minImportance: 3 });
+    assert.equal(r.kept.length, 1); assert.equal(r.minor.length, 2);
+    assert.equal(core.filterFacts([{ text: 'Gaius aime le vin de Falerne.', importance: 2 }], { minImportance: 1 }).kept.length, 1);
+});
+t('1.2.0 mots-clés : pas de mots vides ni d’adverbes, noms propres et substantifs', () => {
+    for (const w of ['laquelle', 'longuement', 'lentement', 'soudain', 'pendant', 'chose']) assert.ok(core.STOPWORDS.has(w), w);
+    const k = core.autoKeywords('Marcus fixa longuement la porte par laquelle Livia avait disparu.');
+    assert.ok(k.includes('Marcus') && k.includes('Livia') && k.includes('porte'), k.join());
+    assert.ok(!k.some((x) => /laquelle|longuement|disparu|avait/i.test(x)), k.join());
+    const k2 = core.autoKeywords('Marcus veut que Gaius empêche Livia de recommencer, il le juge devenu trop sûr de lui.');
+    assert.ok(!k2.some((x) => /recommencer|juge|devenu/i.test(x)), k2.join());
+    assert.deepEqual(core.autoKeywords('Le sénateur Brutus garde la dague de son père.'), ['Brutus', 'sénateur', 'dague']);
+    const c = core.cleanKeywords(['laquelle', 'longuement', 'Marcus', 'porte', 'Marcus'], 'Marcus et la porte');
+    assert.deepEqual(c, ['Marcus', 'porte']);
 });
 console.log(n, 'tests OK');

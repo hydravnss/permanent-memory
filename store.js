@@ -14,7 +14,7 @@ export const PROMPT_KEY = 'permanent_memory';
 export const FILE = 'permanent_memory_store.json';
 export const LOG = '[Mémoire Permanente]';
 export const VERSION = '1.0.1';
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 export const STORE_VERSION = 1;
 
 export const ctx = () => globalThis.SillyTavern.getContext();
@@ -39,8 +39,10 @@ export const DEFAULTS = Object.freeze({
     groupAllMembers: true, // groupes : injecter les souvenirs de TOUS les membres (+ groupe + monde) ; le perso qui parle est favorisé
     groupIncludeMuted: true, // groupes : inclure aussi les membres « muets » (désactivés dans le groupe)
     // création
-    heuristics: true,
+    heuristics: false, // 1.2.0 : analyse locale automatique à chaque message désactivée par défaut (elle proposait surtout des faits sans intérêt)
     heuristicsMinScore: 2,
+    scanRaw: false, // 1.2.0 : « Analyser l’historique (gratuit) » ne propose plus les extraits bruts, sauf si on le réactive
+    minImportance: 3, // 1.2.0 : faits proposés par l’IA d’importance inférieure = écartés (« faits mineurs ignorés »)
     inboxMax: 40,
     messageButton: true,
     // IA (tout est coupé par défaut)
@@ -86,7 +88,7 @@ export const PRESETS = Object.freeze({
 
 const NUM = {
     maxMemories: [1, 30], maxTokens: [50, 3000], scanDepth: [1, 10], position: [0, 2], depth: [0, 50], role: [0, 2],
-    heuristicsMinScore: [1, 6], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 4000], extractMessages: [4, 200], extractInputTokens: [500, 20000], autoMsgChars: [100, 2000], sceneMessages: [4, 60],
+    heuristicsMinScore: [1, 6], minImportance: [1, 5], inboxMax: [5, 200], autoEvery: [2, 100], autoMaxItems: [1, 10], autoMaxTokens: [50, 4000], extractMessages: [4, 200], extractInputTokens: [500, 20000], autoMsgChars: [100, 2000], sceneMessages: [4, 60],
     maxCallsPerDay: [0, 100], maxTokensPerMonth: [0, 5000000], summaryEvery: [10, 500], summaryMaxTokens: [50, 1000], archiveDays: [7, 730],
     floatX: [0, 100], floatY: [0, 100], floatSize: [34, 90],
 };
@@ -109,6 +111,7 @@ export function S() {
     s.groupAllMembers = s.groupAllMembers !== false;
     s.groupIncludeMuted = s.groupIncludeMuted !== false;
     if (prevVersion < 3) migrateTo3(s);
+    if (prevVersion < 4) migrateTo4(s);
     s.settingsVersion = SETTINGS_VERSION;
     return s;
 }
@@ -123,6 +126,15 @@ function migrateTo3(s) {
     if (s.autoMaxItems === 4) s.autoMaxItems = DEFAULTS.autoMaxItems;
     if (s.autoMaxTokens === 400) s.autoMaxTokens = DEFAULTS.autoMaxTokens;
     if (s.extractInputTokens === 3000) s.extractInputTokens = DEFAULTS.extractInputTokens;
+    try { saveSettings(); } catch { /* ignore */ }
+}
+
+/**
+ * Migration 1.2.0 : l'analyse locale automatique à chaque message passe à « off » si l'ancien défaut (on) est en place.
+ * (minImportance et scanRaw, nouveaux, prennent leur défaut.)
+ */
+function migrateTo4(s) {
+    if (s.heuristics === true) s.heuristics = false;
     try { saveSettings(); } catch { /* ignore */ }
 }
 

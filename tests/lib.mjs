@@ -10,7 +10,7 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function mock(ctl) { return (await fetch(`${MOCK}/_ctl`, { method: 'POST', body: JSON.stringify(ctl) })).json(); }
 export const mockLog = async () => (await fetch(`${MOCK}/_log`)).json();
-export const mockClear = async () => { await fetch(`${MOCK}/_log`, { method: 'DELETE' }); await mock({ queue: [], default: 'ok' }); };
+export const mockClear = async () => { await fetch(`${MOCK}/_log`, { method: 'DELETE' }); await mock({ queue: [], default: 'ok', delay: 0 }); };
 
 export async function boot({ context: ctxOpts } = {}) {
     const browser = await webkit.launch();

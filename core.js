@@ -24,8 +24,10 @@ export const TYPE_ICONS = Object.freeze({ fait: '📌', relation: '❤️', even
 /* ------------------------------------------------------------------ texte */
 
 const STOP_FR = `a ai aie aient aies ait as au aux avec avoir avons avez ayant c ca car ce ceci cela celle celles celui ces cet cette ceux chaque ci comme comment d dans de des donc dont du elle elles en encore es est et etaient etais etait ete etre eu eux fait faire fais font il ils j je jusque l la le les leur leurs lui m ma mais me meme mes moi mon n ne ni nos notre nous on ont ou ou par pas pour pourquoi qu que quel quelle quelles quels qui s sa sans se ses si sien son sont sous sur t ta te tes toi ton tous tout toute toutes tres tu un une vos votre vous y suis es sommes etes sera serai seras serons seront serait aurait aura auras auront avait avais avaient ici la alors aussi bien peu plus moins puis ensuite voila voici quand lorsque tandis entre vers chez deja jamais toujours rien quelque quelques autre autres ainsi cependant pourtant peut peux veux veut vais va vas vont allez allons ete oui non ah oh eh hm hum euh ben bah hein ok`;
+// mots vides supplémentaires (1.2.0) : relatifs, adverbes et liaisons qui faisaient de mauvais mots-clés (« laquelle », « longuement »…)
+const STOP_FR2 = `lequel laquelle lesquels lesquelles duquel auquel auxquels auxquelles desquels desquelles dont quoi quiconque celui-ci celle-ci ceux-ci celles-ci cela ceci apres avant pendant depuis devant derriere dessus dessous contre parmi selon sauf malgre durant envers hors outre via lors toutefois neanmoins tellement beaucoup trop assez presque juste seulement vraiment enfin soudain soudainement longuement lentement doucement rapidement simplement finalement doucement brusquement aussitot tantot bientot tard tot souvent parfois longtemps encore desormais dorenavant ailleurs partout dedans dehors autour loin pres plutot surtout notamment egalement certes vite fort tant autant combien quoique puisque lorsqu lorsqu quand meme memes etait etaient avait avaient fut furent eut eurent sera seront ont dit dire disait fit fait faisait semblait semble paraissait parait sembla alla allait vint venait etre avoir chose choses fois facon maniere sorte genre truc moment instant air peu beaucoup tout toute tous toutes rien personne chacun chacune aucun aucune certain certaine certains certaines plusieurs tel telle tels telles autre autres meme`;
 const STOP_EN = `a about after all also am an and any are as at be because been before being but by can could did do does doing for from had has have having he her here hers him his how i if in into is it its just me more most my no nor not of on once only or other our out over own same she should so some such than that the their them then there these they this those through to too under until up very was we were what when where which while who whom why will with would you your yours yourself im ive ill id dont didnt cant wont isnt arent wasnt`;
-export const STOPWORDS = new Set((STOP_FR + ' ' + STOP_EN).split(/\s+/).filter(Boolean));
+export const STOPWORDS = new Set((STOP_FR + ' ' + STOP_FR2 + ' ' + STOP_EN).split(/\s+/).filter(Boolean));
 
 /** minuscules, sans accents, apostrophes unifiées */
 export function normalize(s) {
@@ -314,18 +316,99 @@ function capNames(sentence) {
     const out = [];
     const ws = sentence.split(/\s+/);
     ws.forEach((w, i) => {
-        const clean = w.replace(/^[«"'“(]+|[.,;:!?…»"'”)]+$/g, '');
+        const clean = w.replace(/^[«"'“(*]+|[.,;:!?…»"'”)*]+$/g, '');
         if (i === 0 || clean.length < 3) return;
+        if (/[.!?…:]["»”)*]*$/.test(ws[i - 1] || '') || /^[«"“—–-]/.test(w)) return; // début de phrase / réplique : majuscule non significative
         if (/^[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{2,}$/u.test(clean) && !STOPWORDS.has(normalize(clean))) out.push(clean);
     });
     return [...new Set(out)];
 }
 
-/** Mots-clés automatiques : noms propres + 1–2 mots longs. */
+const DETERMINERS = new Set('le la les l un une des du de d au aux mon ma mes ton ta tes son sa ses notre nos votre vos leur leurs ce cet cette ces quel quelle the a an his her their my your'.split(' '));
+// noms courants en -ment / -ait (ne pas les confondre avec un adverbe ou un verbe conjugué)
+const NOUN_OK = new Set('jugement gouvernement comportement sentiment mouvement evenement enlevement testament commandement traitement engagement serment appartement batiment vetement moment element argument document monument instrument regiment chatiment departement enterrement couronnement avertissement parlement armement attachement ressentiment tourment chantage portrait attrait extrait souhait trait lait'.split(' '));
+/** Vrai si le mot (normalisé) ressemble à un adverbe ou à un verbe conjugué plutôt qu'à un nom. */
+function notANoun(w) {
+    if (NOUN_OK.has(w)) return false;
+    if (/(amment|emment)$/.test(w)) return true;
+    if (/ment$/.test(w) && /e$/.test(w.slice(0, -4))) return true; // longuement, doucement, lentement
+    if (/(aient|erait|eraient|erent|assent|issait|issaient|ions|iez)$/.test(w)) return true;
+    if (w.length >= 6 && /ait$/.test(w)) return true; // regardait, disparaissait
+    return false;
+}
+const SUBJECTS = new Set('je tu il elle on nous vous ils elles qui ne'.split(' '));
+/** Noms communs probables : mots précédés d'un déterminant (« la porte », « son épée »), hors mots vides. */
+function likelyNouns(text) {
+    const toks = normalize(cleanText(text)).replace(/'/g, ' ').match(/[a-z0-9-]+/g) || [];
+    const out = [];
+    for (let i = 1; i < toks.length; i++) {
+        const w = toks[i];
+        if (!DETERMINERS.has(toks[i - 1]) || w.length < 4 || STOPWORDS.has(w) || notANoun(w) || /^\d+$/.test(w)) continue;
+        if ((toks[i - 1] === 'de' || toks[i - 1] === 'd') && /(er|ir)$/.test(w)) continue; // « de recommencer » : infinitif, pas un nom
+        if (['le', 'la', 'les', 'l'].includes(toks[i - 1]) && SUBJECTS.has(toks[i - 2])) continue; // « il le juge » : pronom + verbe
+        out.push(w);
+    }
+    return [...new Set(out)];
+}
+/** Retrouve la graphie d'origine (accents) d'un mot normalisé dans le texte. */
+function originalForm(text, w) {
+    for (const raw of String(text).split(/[^\p{L}\p{N}'-]+/u)) for (const part of raw.split(/'/)) if (normalize(part) === w) return part.toLowerCase();
+    return w;
+}
+
+/** Mots-clés automatiques : noms propres d'abord, puis noms communs (après un déterminant) — jamais de mots vides, d'adverbes ni de verbes conjugués. */
 export function autoKeywords(text, max = 4) {
-    const names = capNames(' ' + cleanText(text));
-    const longs = [...new Set(words(text).filter((w) => w.length >= 6))].sort((a, b) => b.length - a.length).slice(0, 2);
-    return [...new Set([...names, ...longs])].slice(0, max);
+    const t = cleanText(text);
+    const names = capNames(' ' + t);
+    const nouns = likelyNouns(t).filter((w) => !names.some((n) => normalize(n) === w)).sort((a, b) => b.length - a.length).slice(0, 2).map((w) => originalForm(t, w));
+    return [...new Set([...names, ...nouns])].slice(0, max);
+}
+
+/** Nettoie des mots-clés fournis (par l'IA) : retire mots vides, adverbes, verbes conjugués, mots trop courts ; complète avec autoKeywords si besoin. */
+export function cleanKeywords(kws, text, max = 5) {
+    const out = [];
+    const seen = new Set();
+    for (const k0 of kws || []) {
+        const k = String(k0).replace(/^[\s#«"“']+|[\s.»"”']+$/g, '').trim();
+        const n = normalize(k);
+        const ws = n.replace(/'/g, ' ').match(/[a-z0-9-]+/g) || [];
+        if (!k || k.length < 3 || !ws.length || seen.has(n)) continue;
+        if (ws.length === 1 && (STOPWORDS.has(ws[0]) || (!/^\p{Lu}/u.test(k) && notANoun(ws[0])))) continue;
+        if (ws.every((w) => STOPWORDS.has(w))) continue;
+        seen.add(n);
+        out.push(k);
+    }
+    if (out.length < 2) for (const k of autoKeywords(text, max)) if (!seen.has(normalize(k))) { seen.add(normalize(k)); out.push(k); }
+    return out.slice(0, max);
+}
+
+/* -- faits mineurs : gestes, regards, mouvements, répliques ponctuelles, sans contenu relationnel ni enjeu durable -- */
+
+const GESTURE_RE = /\b(regard\w*|fix(e|a|ait|aient|erent|ent)|observ\w*|contempl\w*|scrut\w*|tois\w*|devisag\w*|lorgn\w*|coup d'oeil|jet\w* un oeil|(leve|leva|levait|baisse|baissa|baissait|plisse|plissa|ferme|ferma|fermait|detourn\w*|roul\w*) (les|ses|son) (yeux|regard|paupieres)|yeux|souri\w*|sourire|rit|riait|rire|ricana\w*|ricane\w*|glouss\w*|hoch\w*|haussa\w*|hausse\w* (les|un|le)|soupir\w*|se (tourn|retourn|leve|leva|levait|pench|redress|rassi|lev)\w*|s'(assi|assoi|assey|install|approch|eloign|avanc|eclairc|etir|adoss|accoud|appui)\w*|croise\w* les bras|croisa les bras|pos\w* (sa|la|une) main|effleur\w*|tapot\w*|recul\w*|avanc\w* (vers|d'un pas)|fait les cent pas|faisait les cent pas|marcha\w*|marche (vers|jusqu)|rougi\w*|frisson\w*|trembl\w*|deglut\w*|gorgee|allum\w* une cigarette|ajust\w*|liss\w*|racl\w* la gorge|murmur\w*|chuchot\w*|marmonn\w*|grommel\w*|entr(e|a|ait) dans la (piece|salle|chambre)|quitt(e|a|ait) la (piece|salle|chambre)|par laquelle|claqu\w* la porte|silence|ambiance|atmosphere|decor|lumiere|soleil couchant|pluie battante|odeur|parfum de)\b/;
+const MATTER_RE = /\b(aim(e|ent|ait|aient|er)|amour\w*|amoureu\w*|jalou\w*|rival\w*|trahi\w*|trahison|alli(e|es|ee|ees|ance|ances)|promet\w*|promi\w*|promesse\w*|jur(e|a|ait|ent)|serment|menac\w*|secret\w*|revel\w*|avou\w*|aveu|decid\w*|decision|veu(t|lent)|voul\w*|refus\w*|exig\w*|ordonn\w*|ordre|craint|crain\w*|peur|mefi\w*|detest\w*|hai(t|ssent|ne)|confiance|mari(e|ee|es|age)|epous\w*|fianc\w*|ennemi\w*|complot\w*|tu(er|e|a|ee)|meurtr\w*|mort|venge\w*|vengeance|proteg\w*|protection|dette|pacte|accord|accus\w*|soupcon\w*|chantage|empech\w*|jug(e|ea|eait)|consider\w*|pense que|sait que|savoir que|decouvr\w*|appren\w*|appris|nomm\w*|promu\w*|destitu\w*|renvoy\w*|chef|mission|plan|projet|objectif|frere|soeur|pere|mere|fils|fille|enfant\w*|heritier\w*|roi|reine|dirige\w*|pouvoir|blesse\w*|enceinte|naissance|dispute\w*|rupture|quitt(e|er) (definitivement|pour)|humili\w*|insult\w*|gifl\w*|embrass\w*|baiser|complice\w*|attir\w*|desir\w*|rancune\w*|honte|pardon\w*)\b/;
+
+/**
+ * Fait « mineur » à écarter : décrit surtout un geste, un regard, un mouvement, une ambiance ou une réplique ponctuelle,
+ * sans contenu relationnel ni enjeu durable. Renvoie la raison, ou '' si le fait semble important.
+ */
+export function minorReason(text) {
+    const n = normalize(cleanText(text));
+    if (!n) return 'vide';
+    if (GESTURE_RE.test(n) && !MATTER_RE.test(n)) return 'geste / regard / ambiance';
+    return '';
+}
+
+/**
+ * Tri qualité des faits proposés : importance < minImportance ou geste sans enjeu → écarté.
+ * @returns {{ kept: object[], minor: object[] }}
+ */
+export function filterFacts(items, { minImportance = 3 } = {}) {
+    const kept = []; const minor = [];
+    for (const it of items || []) {
+        const why = clampInt(it.importance, 1, 5, 3) < minImportance ? 'importance' : minorReason(it.text);
+        if (why) minor.push({ ...it, why }); else kept.push(it);
+    }
+    return { kept, minor };
 }
 
 /** Score d'une phrase : { score, type, imp } — score >= 2 = candidat. */
@@ -502,45 +585,75 @@ export function copyReason(text, messages) {
     return '';
 }
 
-export function buildExtractionPrompt(messages, { maxItems = 8, msgChars = 400, existing = [] } = {}) {
-    const system = `Tu tiens la mémoire à long terme d'un jeu de rôle (souvent en groupe, avec plusieurs personnages). À partir des messages fournis, tu écris de PETITS SOUVENIRS RÉSUMÉS ET REFORMULÉS, jamais des copies du chat.
+/** Ce qui mérite d'être retenu / ce qui est interdit (partagé par l'extraction et le résumé de scène). */
+const KEEP_RULES = `À GARDER — uniquement ce qui comptera encore dans 20 messages :
+- relations entre personnages et leur évolution : amour, attirance, jalousie, rivalité, trahison, alliance, rancune, confiance perdue ou gagnée ;
+- conflits, menaces, décisions, promesses, engagements, ordres donnés ;
+- secrets révélés (et qui les connaît), mensonges découverts ;
+- tournants de l'intrigue, changements de statut ou de rôle (titre, rang, fonction, mariage, exil, blessure grave, mort) ;
+- faits durables sur un personnage (origine, famille, but, peur profonde, intention cachée) ;
+- lieux et objets clés pour l'histoire.
+INTERDIT — ne l'écris jamais :
+- gestes, regards, sourires, soupirs, mouvements, déplacements dans la pièce ;
+- ambiance, décor, météo, lumière, vêtements, repas ;
+- répliques ponctuelles, politesses, émotions passagères (agacement d'un instant, surprise, gêne).`;
 
-Règles :
-- Une ligne = un seul fait, de 10 à 25 mots, en français, à la troisième personne, avec les prénoms tels qu'ils apparaissent dans les messages (« Léo… », « Mara… »). Jamais « je », « tu », « nous ».
-- Reformule avec tes propres mots. Ne recopie AUCUNE phrase ni réplique : pas de guillemets, pas de dialogue, pas de citation, pas de description de gestes.
+export function buildExtractionPrompt(messages, { maxItems = 8, msgChars = 400, existing = [] } = {}) {
+    const system = `Tu tiens la mémoire à long terme d'un jeu de rôle (souvent en groupe, avec plusieurs personnages). À partir des messages fournis, tu notes SEULEMENT les faits importants, sous forme de PETITS SOUVENIRS RÉSUMÉS ET REFORMULÉS, jamais des copies du chat.
+
+${KEEP_RULES}
+
+Règles d'écriture :
+- Une ligne = un seul fait, de 10 à 25 mots, en français, à la troisième personne, avec les prénoms tels qu'ils apparaissent dans les messages. Jamais « je », « tu », « nous ».
+- Reformule avec tes propres mots. Ne recopie AUCUNE phrase ni réplique : pas de guillemets, pas de dialogue, pas de citation.
 - Chaque souvenir doit se comprendre seul, sans avoir lu le chat : nomme les personnes et les lieux (pas de « il », « elle », « ici », « hier » sans précision).
-- Sois complet sur ce qui servira plus tard : relations entre personnages (liens, sentiments, tensions), événements marquants, décisions, promesses et engagements, secrets (et qui les connaît), préférences et aversions, état émotionnel durable, lieux et objets importants. Couvre tous les points importants avant de détailler un seul.
-- Ignore le décor, les politesses, les gestes passagers, et tout ce qui figure déjà dans les souvenirs connus (ne le répète pas, n'ajoute que du nouveau ou un vrai changement).
-- Au maximum ${maxItems} lignes.
+- Dis l'enjeu ou l'intention (qui veut quoi, pourquoi, envers qui), pas la mise en scène.
+- Moins de faits, mais forts : mieux vaut 2 lignes essentielles que 8 lignes moyennes. Au maximum ${maxItems} lignes, souvent bien moins.
+- Importance : 5 = change l'histoire (trahison, mort, secret majeur, alliance ou rupture) ; 4 = relation, décision, promesse ou menace durable ; 3 = fait durable utile plus tard. N'écris AUCUNE ligne d'importance 1 ou 2 : si c'est mineur, ne l'écris pas.
+- N'écris rien de ce qui figure déjà dans les souvenirs connus (sauf un vrai changement).
 
 Format exact, une ligne par souvenir, rien d'autre :
 type|importance(1-5)|souvenir|mot-clé1,mot-clé2
 Types : fait, relation, evenement, preference, lieu, objectif (objectif = promesse, décision ou but).
+Mots-clés : 2 à 4 noms propres ou noms communs importants (personnes, lieux, objets), jamais de mots vides ni d'adverbes.
 
-Exemples de bonnes lignes (ne les recopie pas) :
-relation|4|Mara se méfie de Théo depuis qu'il lui a menti sur l'origine de la lettre.|Mara,Théo,méfiance
-evenement|5|Léo a découvert que le maire Dorian finance en secret la bande qui attaque le village.|Léo,Dorian,secret
-objectif|4|Nina a promis à Léo de l'accompagner à Valmont dès que la tempête sera passée.|Nina,Léo,Valmont,promesse
-preference|2|Théo déteste le café et boit chaque matin du thé noir sans sucre.|Théo,thé
-lieu|3|La vieille tour de guet, au nord du village, sert de refuge secret au groupe.|tour,refuge
+Mauvais (à ne JAMAIS écrire : geste, regard, mise en scène sans enjeu) :
+✗ Marcus fixa longuement la porte par laquelle Livia avait disparu.
+✗ Octavie sourit et servit du vin à ses invités dans le grand salon.
+✗ Gaius soupira, agacé par la remarque de Marcus.
 
-Aucune introduction, aucune explication. Si rien de nouveau ni d'important : réponds RIEN.`;
+Bons (enjeu durable ; ne les recopie pas) :
+objectif|4|Marcus veut que Gaius empêche Livia de recommencer, il la juge devenue trop sûre d'elle.|Marcus,Gaius,Livia
+relation|5|Livia a trahi Marcus en livrant ses lettres au préfet Severus, qui la protège désormais.|Livia,Marcus,Severus,trahison
+relation|4|Octavie est jalouse de Livia depuis que Marcus lui confie ses plans plutôt qu'à elle.|Octavie,Livia,Marcus,jalousie
+evenement|5|Gaius a été nommé centurion de la garde du palais, ce qui le place au-dessus de Marcus.|Gaius,Marcus,centurion
+fait|4|Severus cache qu'il est le demi-frère de Marcus ; seule Octavie le sait.|Severus,Marcus,Octavie,secret
+
+Aucune introduction, aucune explication. S'il n'y a rien d'important (rien que des gestes, de l'ambiance ou des répliques sans conséquence) : réponds RIEN.`;
     const known = existing.length ? `Souvenirs déjà connus (à ne pas répéter) :\n${existing.map((t) => `- ${t}`).join('\n')}\n\n` : '';
     const body = messages.map((m) => `${m.name}: ${cleanText(m.mes).slice(0, msgChars)}`).join('\n');
-    return { systemPrompt: system, prompt: `${known}Messages :\n${body}\n\nSouvenirs résumés à ajouter (reformulés, 3ᵉ personne) :` };
+    return { systemPrompt: system, prompt: `${known}Messages :\n${body}\n\nFaits importants à retenir (reformulés, 3ᵉ personne, ou RIEN) :` };
 }
 
-/** Résumé de la scène récente : 2 à 4 phrases, un seul souvenir de type événement. */
+/** Résumé de la scène récente : 2 à 4 phrases, un seul souvenir de type événement — seulement ce qui compte pour la suite. */
 export function buildScenePrompt(messages, { msgChars = 700 } = {}) {
-    const system = `Tu résumes la scène récente d'un jeu de rôle pour garder la continuité. Écris 2 à 4 phrases courtes, en français, à la troisième personne, avec les prénoms des personnages. Raconte ce qui s'est passé d'important (événements, décisions, révélations, changements de relation, de lieu ou d'état d'esprit) et dans quelle situation la scène s'arrête. Reformule avec tes propres mots : aucune réplique recopiée, aucun guillemet. Le résumé doit se comprendre sans avoir lu le chat. Réponds UNIQUEMENT par le résumé : ni introduction, ni titre, ni liste.`;
+    const system = `Tu résumes la scène récente d'un jeu de rôle pour garder la continuité de l'intrigue. Écris 2 à 4 phrases courtes, en français, à la troisième personne, avec les prénoms des personnages.
+
+${KEEP_RULES}
+
+Raconte uniquement ce qui a changé et comptera pour la suite (relations, conflits, décisions, promesses, menaces, révélations, changements de statut), puis dans quelle situation la scène s'arrête (qui veut quoi, ce qui reste en suspens). Dis les enjeux et les intentions, pas la mise en scène.
+Mauvais : « Marcus fixa longuement la porte par laquelle Livia avait disparu, puis se servit un verre. »
+Bon : « Marcus veut que Gaius empêche Livia de recommencer : il la juge devenue trop sûre d'elle depuis qu'elle a l'appui du préfet. »
+Reformule avec tes propres mots : aucune réplique recopiée, aucun guillemet. Le résumé doit se comprendre sans avoir lu le chat. Réponds UNIQUEMENT par le résumé : ni introduction, ni titre, ni liste. S'il ne s'est rien passé d'important (seulement des gestes, de l'ambiance ou des banalités), réponds RIEN.`;
     const body = messages.map((m) => `${m.name}: ${cleanText(m.mes).slice(0, msgChars)}`).join('\n');
-    return { systemPrompt: system, prompt: `Messages :\n${body}\n\nRésumé de la scène (2 à 4 phrases) :` };
+    return { systemPrompt: system, prompt: `Messages :\n${body}\n\nRésumé de la scène (2 à 4 phrases, ou RIEN) :` };
 }
 
 /** Nettoie la réponse « résumé de scène » (réflexion, clôtures, titre, guillemets englobants). */
 export function parseSceneSummary(raw, maxChars = 600) {
     let t = stripModelNoise(raw).replace(/^\s*(voici|résumé|resume|scène|scene)[^\n:]{0,40}:\s*/i, '');
     t = cleanText(t).replace(/^["«“]\s*|\s*["»”]$/g, '').trim();
+    if (/^rien\b[\s.!…]*$/i.test(t)) return '';
     if (t.length > maxChars) {
         const cut = t.slice(0, maxChars);
         const end = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
@@ -624,6 +737,7 @@ export function parseExtraction(raw, maxItems = 6) {
     }
     // 2) lignes « type|importance|fait|mots-clés »
     for (let line of text.split(/\n+/)) {
+        if (/^\s*[✗✘❌]/.test(line)) continue; // contre-exemple recopié par le modèle
         line = line.trim().replace(/^[-*•\d.)\s]+/, '').trim();
         if (!line || /^rien\b/i.test(line)) continue;
         if (!line.includes('|') && (/[:：]\s*$/.test(line) || PREAMBLE.test(line) || /^[\[\]{}(),]+$/.test(line))) continue;
