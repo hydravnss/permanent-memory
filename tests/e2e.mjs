@@ -129,7 +129,7 @@ await sleep(4000);
 log = await mockLog();
 ok(log.filter(isExtractionReq).length === 1 && log.length === 3, `Après 4 messages : EXACTEMENT 1 appel d’extraction (total ${log.length})`);
 const exReq = log.find(isExtractionReq);
-ok(JSON.stringify(exReq.messages).length < 3500, `Prompt d’extraction court (${JSON.stringify(exReq.messages).length} caractères)`);
+ok(JSON.stringify(exReq.messages).length < 5000, `Prompt d’extraction court (1.2.0 : consignes + exemples bon/mauvais plus longs) (${JSON.stringify(exReq.messages).length} caractères)`);
 let iaC = await P(() => globalThis.permanentMemory.store.store.candidates.filter((c) => c.origin === 'ia').map((c) => c.text));
 ok(iaC.length === 2, `2 candidats IA dans la boîte (${iaC.join(' | ')})`);
 let stt = await P(() => ({ ...globalThis.permanentMemory.settings().stats }));
