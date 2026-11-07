@@ -9,6 +9,10 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.2.5 — formulaire d’ajout visible sur iPhone
+
+Le formulaire ne s’ouvre plus hors écran (barre + clavier sans fenêtre). Il s’affiche dans le panneau, et le champ texte n’est plus autofocus au tap sur Ajouter.
+
 ## Mise à jour 1.2.4 — bouton Ajouter
 
 Le formulaire « Nouveau souvenir » passait derrière le panneau (d’où un clavier sans fenêtre). Il s’ouvre maintenant par-dessus.

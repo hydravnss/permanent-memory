@@ -241,3 +241,30 @@ body.pmem-lock #right-nav-panel {
     background-image: none !important;
     color: var(--SmartThemeBodyColor, #ddd);
 }
+
+
+/* 1.2.5 : éditeur à l’intérieur du panneau, sans autofocus iOS (plus de barre fantôme / clavier sans fenêtre) */
+#pmem-sheet #pmem-dialog {
+    position: absolute !important;
+    inset: 0 !important;
+    z-index: 80 !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    overflow-y: auto !important;
+    padding: 10px 10px 24px !important;
+    background: rgba(0, 0, 0, .72) !important;
+    box-sizing: border-box;
+}
+#pmem-dialog .pmem-dlg {
+    width: 100%;
+    max-width: 520px;
+    margin-top: 8px !important;
+    max-height: min(70dvh, 620px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: #16161a !important;
+    background-image: none !important;
+    color: var(--SmartThemeBodyColor, #ddd);
+    box-sizing: border-box;
+}

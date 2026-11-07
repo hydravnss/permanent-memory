@@ -220,6 +220,8 @@ export function openSheet(tab) {
 }
 export function closeSheet() {
     ui.open = false;
+    $('#pmem-dialog')?.remove();
+    document.activeElement?.blur?.();
     $('#pmem-sheet')?.classList.remove('pmem-open');
     document.body.classList.remove('pmem-lock');
 }
@@ -689,7 +691,8 @@ ${mode === 'cand' && entry?.raw ? '<div class="pmem-note">✂️ Extrait brut : 
 <label class="checkbox_label"><input type="checkbox" id="pmem-d-pin"${m.pinned ? ' checked' : ''}><span>📌 Épinglé (toujours injecté)</span></label>
 <div class="pmem-dbtns"><button type="button" class="menu_button" id="pmem-d-cancel">Annuler</button><button type="button" class="menu_button ok" id="pmem-d-save">Enregistrer</button></div>
 </div>`;
-    document.body.appendChild(d);
+    const host = $('#pmem-sheet.pmem-open') || document.body;
+    host.appendChild(d);
     const area = $('#pmem-d-text', d);
     const count = () => { $('#pmem-d-count', d).textContent = `≈ ${core.estTokens(area.value)} tokens`; };
     area.addEventListener('input', count); count();
@@ -720,7 +723,9 @@ ${mode === 'cand' && entry?.raw ? '<div class="pmem-note">✂️ Extrait brut : 
         onSave?.();
         renderSoon();
     });
-    area.focus();
+    /* Pas d'autofocus sur tactile : iOS remonte le champ hors écran et n'affiche qu'une barre + le clavier. */
+    const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
+    if (!touch) area.focus();
 }
 
 /** Bouton 🧠 d'un message : propose le texte (sélection > phrases clés) et ouvre l'éditeur. */
