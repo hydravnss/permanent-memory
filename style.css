@@ -14,13 +14,13 @@
 
 /* ---------- panneau plein écran ---------- */
 body.pmem-lock { overscroll-behavior: none; }
-#pmem-sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 30010; isolation: isolate; display: none; background: rgba(0, 0, 0, .55); }
+#pmem-sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 30010; isolation: isolate; display: none; background: #000; }
 #pmem-sheet.pmem-open { display: block; }
 #pmem-sheet .pmem-panel {
     position: absolute; left: 0; right: 0; top: 0; bottom: 0;
     max-width: 760px; margin: 0 auto;
     display: flex; flex-direction: column;
-    background: linear-gradient(var(--SmartThemeBlurTintColor, #1c1c1f), var(--SmartThemeBlurTintColor, #1c1c1f)), #16161a; color: var(--SmartThemeBodyColor, #ddd);
+    background-color: #16161a; background-image: linear-gradient(var(--SmartThemeBlurTintColor, #1c1c1f), var(--SmartThemeBlurTintColor, #1c1c1f)); color: var(--SmartThemeBodyColor, #ddd);
     border-left: 1px solid var(--SmartThemeBorderColor, #555); border-right: 1px solid var(--SmartThemeBorderColor, #555);
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
     font-size: 15px;
@@ -33,7 +33,7 @@ body.pmem-lock { overscroll-behavior: none; }
 #pmem-sheet .pmem-tabs button { flex: 1 0 auto; min-height: 44px; padding: 0 12px; background: transparent; color: inherit; border: 0; border-bottom: 3px solid transparent; font-size: 15px; cursor: pointer; white-space: nowrap; }
 #pmem-sheet .pmem-tabs button.on { border-bottom-color: var(--SmartThemeQuoteColor, #4ae); font-weight: 700; }
 .pmem-badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--SmartThemeQuoteColor, #4ae); color: #000; font-size: 12px; text-align: center; }
-#pmem-sheet .pmem-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 24px; }
+#pmem-sheet .pmem-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 24px; background-color: #16161a; background-image: linear-gradient(var(--SmartThemeBlurTintColor, #1c1c1f), var(--SmartThemeBlurTintColor, #1c1c1f)); }
 
 #pmem-sheet .pmem-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
 #pmem-sheet .pmem-filters #pmem-q { grid-column: 1 / -1; }
@@ -49,7 +49,7 @@ body.pmem-lock { overscroll-behavior: none; }
 #pmem-sheet .pmem-warn { margin: 6px 0; padding: 6px 8px; border-radius: 6px; background: rgba(255, 170, 0, .18); border: 1px solid rgba(255, 170, 0, .6); font-size: .9em; }
 #pmem-sheet .pmem-empty { text-align: center; opacity: .7; padding: 28px 8px; line-height: 1.6; }
 
-#pmem-sheet .pmem-card { border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 10px; padding: 9px 10px; margin: 8px 0; background: rgba(255, 255, 255, .04); }
+#pmem-sheet .pmem-card { border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 10px; padding: 9px 10px; margin: 8px 0; background-color: #222226; }
 #pmem-sheet .pmem-card.pin { border-color: var(--SmartThemeQuoteColor, #4ae); }
 #pmem-sheet .pmem-card.off { opacity: .55; }
 #pmem-sheet .pmem-card.arch { opacity: .5; border-style: dashed; }
@@ -142,7 +142,13 @@ body.pmem-lock { overscroll-behavior: none; }
 
 /* 1.2.1 : mobile — le panneau passe au-dessus des tiroirs ST (z-index), fond opaque ; libellés longs des <select> ; en-tête compact */
 #pmem-sheet .pmem-panel, #pmem-sheet .pmem-body { min-width: 0; }
-#pmem-sheet .pmem-head, #pmem-sheet .pmem-tabs { flex: 0 0 auto; position: relative; z-index: 1; background: inherit; }
+#pmem-sheet .pmem-head, #pmem-sheet .pmem-tabs {
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 1;
+    background-color: #16161a;
+    background-image: linear-gradient(var(--SmartThemeBlurTintColor, #1c1c1f), var(--SmartThemeBlurTintColor, #1c1c1f));
+}
 #pmem-sheet select.text_pole, #pmem-dialog select.text_pole, .pmem-settings .pmem-field select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; padding-right: 26px; box-sizing: border-box; }
 #pmem-sheet .pmem-filters > * { min-width: 0; width: 100%; margin: 0; }
 .pmem-settings .pmem-field { min-width: 0; }

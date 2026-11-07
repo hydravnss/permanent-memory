@@ -9,6 +9,10 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.2.2 — fond du panneau vraiment opaque sur iPhone
+
+Sur Safari iOS, la zone défilante du panneau 🧠 n’avait pas son propre fond : le chat restait visible derrière (« Tout (ce contexte) » seul apparaissait clairement). Le corps, l’en-tête et les onglets ont maintenant un fond opaque.
+
 ## Mise à jour 1.2.1 — correctif d’affichage mobile
 
 Le panneau 🧠 passe désormais au-dessus des tiroirs de SillyTavern (plus de texte superposé), fond opaque, listes déroulantes et en-tête qui ne débordent plus sur iPhone.
