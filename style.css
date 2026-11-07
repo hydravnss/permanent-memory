@@ -229,3 +229,15 @@ body.pmem-lock #right-nav-panel {
     background: #16161a !important;
     background-image: none !important;
 }
+
+
+/* 1.2.4 : le formulaire Ajouter / Modifier passe au-dessus du panneau plein écran */
+#pmem-dialog {
+    z-index: 2147483646 !important;
+    background: rgba(0, 0, 0, .72) !important;
+}
+#pmem-dialog .pmem-dlg {
+    background: #16161a !important;
+    background-image: none !important;
+    color: var(--SmartThemeBodyColor, #ddd);
+}
