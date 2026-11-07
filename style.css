@@ -14,20 +14,20 @@
 
 /* ---------- panneau plein écran ---------- */
 body.pmem-lock { overscroll-behavior: none; }
-#pmem-sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 4000; display: none; background: rgba(0, 0, 0, .55); }
+#pmem-sheet { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 30010; isolation: isolate; display: none; background: rgba(0, 0, 0, .55); }
 #pmem-sheet.pmem-open { display: block; }
 #pmem-sheet .pmem-panel {
     position: absolute; left: 0; right: 0; top: 0; bottom: 0;
     max-width: 760px; margin: 0 auto;
     display: flex; flex-direction: column;
-    background: var(--SmartThemeBlurTintColor, #1c1c1f); color: var(--SmartThemeBodyColor, #ddd);
+    background: linear-gradient(var(--SmartThemeBlurTintColor, #1c1c1f), var(--SmartThemeBlurTintColor, #1c1c1f)), #16161a; color: var(--SmartThemeBodyColor, #ddd);
     border-left: 1px solid var(--SmartThemeBorderColor, #555); border-right: 1px solid var(--SmartThemeBorderColor, #555);
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
     font-size: 15px;
 }
 #pmem-sheet .pmem-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--SmartThemeBorderColor, #555); }
-#pmem-sheet .pmem-head b { font-size: 1.1em; }
-#pmem-sheet .pmem-sub { flex: 1; opacity: .7; font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pmem-sheet .pmem-head b { font-size: 1.1em; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pmem-sheet .pmem-sub { flex: 1 1 0; min-width: 0; opacity: .7; font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pmem-sheet .pmem-x { min-width: 44px; min-height: 44px; font-size: 20px; background: transparent; color: inherit; border: 0; cursor: pointer; }
 #pmem-sheet .pmem-tabs { display: flex; overflow-x: auto; gap: 2px; border-bottom: 1px solid var(--SmartThemeBorderColor, #555); -webkit-overflow-scrolling: touch; }
 #pmem-sheet .pmem-tabs button { flex: 1 0 auto; min-height: 44px; padding: 0 12px; background: transparent; color: inherit; border: 0; border-bottom: 3px solid transparent; font-size: 15px; cursor: pointer; white-space: nowrap; }
@@ -78,7 +78,7 @@ body.pmem-lock { overscroll-behavior: none; }
 #pmem-sheet .pmem-sec2 h4 { margin: 12px 0 4px; }
 
 /* ---------- éditeur ---------- */
-#pmem-dialog { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 4100; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, env(safe-area-inset-top)) 10px 20px; box-sizing: border-box; }
+#pmem-dialog { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 30020; isolation: isolate; background: rgba(0, 0, 0, .6); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: max(12px, env(safe-area-inset-top)) 10px 20px; box-sizing: border-box; }
 #pmem-dialog .pmem-dlg { width: 100%; max-width: 520px; background: var(--SmartThemeBlurTintColor, #1c1c1f); color: var(--SmartThemeBodyColor, #ddd); border: 1px solid var(--SmartThemeBorderColor, #666); border-radius: 12px; padding: 12px 14px; margin-top: 6vh; }
 #pmem-dialog h4 { margin: 0 0 8px; }
 #pmem-dialog label { display: flex; flex-direction: column; gap: 3px; margin: 8px 0; font-size: .92em; }
@@ -139,3 +139,21 @@ body.pmem-lock { overscroll-behavior: none; }
 #pmem-sheet .pmem-aibar > .menu_button { flex: 1 1 100%; width: 100%; min-height: 44px; justify-content: center; text-align: center; }
 #pmem-sheet .pmem-aibar > .menu_button.pmem-busy, #pmem-sheet .pmem-aibar > .menu_button.pmem-busy:disabled { opacity: 1 !important; filter: none !important; background: #2d4f7c !important; color: #fff !important; flex-direction: row; flex-wrap: nowrap; }
 #pmem-sheet .pmem-aibar > .menu_button.pmem-armed { background: #b8860b !important; color: #fff !important; }
+
+/* 1.2.1 : mobile — le panneau passe au-dessus des tiroirs ST (z-index), fond opaque ; libellés longs des <select> ; en-tête compact */
+#pmem-sheet .pmem-panel, #pmem-sheet .pmem-body { min-width: 0; }
+#pmem-sheet .pmem-head, #pmem-sheet .pmem-tabs { flex: 0 0 auto; position: relative; z-index: 1; background: inherit; }
+#pmem-sheet select.text_pole, #pmem-dialog select.text_pole, .pmem-settings .pmem-field select { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; padding-right: 26px; box-sizing: border-box; }
+#pmem-sheet .pmem-filters > * { min-width: 0; width: 100%; margin: 0; }
+.pmem-settings .pmem-field { min-width: 0; }
+.pmem-settings .pmem-field > span { overflow-wrap: anywhere; line-height: 1.3; }
+.pmem-settings .pmem-sec { clear: both; }
+.pmem-settings .pmem-sec h4 { line-height: 1.3; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+    #pmem-sheet .pmem-panel { border-left: 0; border-right: 0; font-size: 14px; }
+    #pmem-sheet .pmem-head { padding: 6px 4px 6px 10px; gap: 6px; }
+    #pmem-sheet .pmem-head b { font-size: 1em; }
+    #pmem-sheet .pmem-sub { font-size: .78em; }
+    #pmem-sheet .pmem-tabs button { padding: 0 9px; font-size: 14px; }
+    #pmem-sheet .pmem-body { padding: 8px 10px 24px; }
+}

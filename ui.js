@@ -27,7 +27,7 @@ const FIELDS = [
     { key: 'maxTokens', type: 'num', label: 'Budget max (tokens)', min: 50, max: 3000, step: 50 },
     { key: 'scanDepth', type: 'num', label: 'Messages récents analysés', min: 1, max: 10 },
     { key: 'minScore', type: 'num', label: 'Sensibilité (score min. ; plus haut = plus strict)', min: 0.1, max: 5, step: 0.1 },
-    { key: 'position', type: 'select', label: 'Position', options: [[1, 'Dans le chat (profondeur) — conseillé, garde le cache'], [0, 'Après le prompt système'], [2, 'Avant le prompt système']] },
+    { key: 'position', type: 'select', label: 'Position', options: [[1, 'Dans le chat (profondeur) — conseillé'], [0, 'Après le prompt système'], [2, 'Avant le prompt système']] },
     { key: 'depth', type: 'num', label: 'Profondeur (si « dans le chat »)', min: 0, max: 50 },
     { key: 'role', type: 'select', label: 'Rôle du message', options: [[0, 'Système'], [1, 'Utilisateur'], [2, 'Assistant']] },
     { key: 'header', type: 'text', label: 'Début du bloc injecté ({{char}} accepté)' },

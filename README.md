@@ -9,6 +9,10 @@ Extension SillyTavern de **mémoire à long terme** pour les bots de jeu de rôl
 
 > ⚠️ **Testée** dans une vraie instance SillyTavern 1.19.0 (Playwright WebKit, émulation iPhone 14 Pro) avec un faux backend compatible OpenAI. **Pas testée sur un vrai iPhone ni avec la vraie API DeepSeek.** Voir « Ce qui est vérifié » en bas.
 
+## Mise à jour 1.2.1 — correctif d’affichage mobile
+
+Le panneau 🧠 passe désormais au-dessus des tiroirs de SillyTavern (plus de texte superposé), fond opaque, listes déroulantes et en-tête qui ne débordent plus sur iPhone.
+
 ## Mise à jour 1.2.0 — moins de souvenirs, mais utiles ; boutons IA plus clairs
 
 - **L'IA ne retient que l'important** : relations et leur évolution (amour, jalousie, rivalité, trahison, alliance), conflits, décisions, promesses, menaces, secrets révélés, tournants de l'intrigue, changements de statut, faits durables, lieux/objets clés. Interdit : gestes, regards, mouvements, ambiance, décor, répliques ponctuelles, émotions passagères. Elle répond « RIEN » s'il n'y a rien d'important (même chose pour 🎬 Résumer).
