@@ -163,3 +163,69 @@ body.pmem-lock { overscroll-behavior: none; }
     #pmem-sheet .pmem-tabs button { padding: 0 9px; font-size: 14px; }
     #pmem-sheet .pmem-body { padding: 8px 10px 24px; }
 }
+
+
+/* 1.2.3 : le panneau prend tout l’écran ; le chat est masqué derrière (iOS le laissait transparaître / recouvrir le contenu) */
+body.pmem-lock {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+}
+body.pmem-lock #sheld,
+body.pmem-lock #chat,
+body.pmem-lock #form_sheld,
+body.pmem-lock #send_form,
+body.pmem-lock #top-bar,
+body.pmem-lock #top-settings-holder,
+body.pmem-lock #bg1,
+body.pmem-lock #bg_custom,
+body.pmem-lock #left-nav-panel,
+body.pmem-lock #right-nav-panel {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+#pmem-sheet.pmem-open {
+    display: flex !important;
+    flex-direction: column !important;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    z-index: 2147483000 !important;
+    background: #111114 !important;
+    isolation: isolate;
+}
+#pmem-sheet .pmem-panel {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    max-width: 760px;
+    height: 100% !important;
+    max-height: 100% !important;
+    margin: 0 auto !important;
+    overflow: hidden !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    background: #16161a !important;
+    background-image: none !important;
+}
+#pmem-sheet .pmem-head,
+#pmem-sheet .pmem-tabs {
+    flex: 0 0 auto !important;
+    background: #16161a !important;
+    background-image: none !important;
+}
+#pmem-sheet .pmem-body {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: auto;
+    background: #16161a !important;
+    background-image: none !important;
+}

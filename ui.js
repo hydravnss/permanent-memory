@@ -213,6 +213,7 @@ export function openSheet(tab) {
     const el = ensureSheet();
     if (tab) ui.tab = tab;
     ui.open = true;
+    document.body.appendChild(el);
     el.classList.add('pmem-open');
     document.body.classList.add('pmem-lock');
     renderSheet();
